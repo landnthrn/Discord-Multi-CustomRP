@@ -443,6 +443,7 @@ namespace CustomRPC
                         new Person { Name = "Yo-3DS" },
                         new Person { Name = "RedNix" },
                         new Person { Name = "20syl", Url = "https://github.com/20syldev" },
+                        new Person { Name = "Skygame404" },
                         new Person { Name = "CercleRouge1" },
                         new Person { Name = "VaporCorp" }, // Account deleted
                         new Person { Name = "jojoblackFr" },
@@ -929,7 +930,7 @@ namespace CustomRPC
             LanguageProgress["et"] = "91.53";
             LanguageProgress["fil"] = "100";
             LanguageProgress["fi"] = "91.53";
-            LanguageProgress["fr"] = "94.07";
+            LanguageProgress["fr"] = "100";
             LanguageProgress["gl"] = "82.2";
             LanguageProgress["ka"] = "91.53";
             LanguageProgress["de"] = "100";
