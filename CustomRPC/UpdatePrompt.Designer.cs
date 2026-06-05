@@ -137,7 +137,7 @@
             // 
             this.AcceptButton = this.buttonUpdate;
             resources.ApplyResources(this, "$this");
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
             this.BackColor = System.Drawing.Color.WhiteSmoke;
             this.CancelButton = this.buttonNotNow;
             this.Controls.Add(this.pictureBoxLogo);

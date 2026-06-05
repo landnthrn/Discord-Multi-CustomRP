@@ -94,7 +94,7 @@ namespace CustomRPC
             // PipeSelector
             // 
             resources.ApplyResources(this, "$this");
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
             this.BackColor = System.Drawing.Color.WhiteSmoke;
             this.CancelButton = this.buttonOK;
             this.Controls.Add(this.labelPipe);
