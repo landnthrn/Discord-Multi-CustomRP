@@ -36,20 +36,19 @@ namespace CustomRPC
         }
 
         /// <summary>
-        /// Helper class to get a version string without trailing zeros (except minor).
+        /// Helper class to get a version string (major.minor.build; revision only if non-zero).
         /// </summary>
         /// <param name="version">A version object.</param>
-        /// <returns>A string without trailing zeros (ex: 2.3 and not 2.3.0.0).</returns>
+        /// <returns>A display string (ex: 2.0.0 or 1.19.2).</returns>
         /// <exception cref="ArgumentNullException"></exception>
         public static string GetVersionString(Version version)
         {
             if (version == null)
                 throw new ArgumentNullException("version");
 
-            string res = version.Major + "." + version.Minor;
+            int build = version.Build >= 0 ? version.Build : 0;
+            string res = version.Major + "." + version.Minor + "." + build;
 
-            if (version.Build > 0 || version.Revision > 0)
-                res += "." + version.Build;
             if (version.Revision > 0)
                 res += "." + version.Revision;
 
@@ -57,13 +56,13 @@ namespace CustomRPC
         }
 
         /// <summary>
-        /// Helper class to get a version string without trailing zeros (except minor).
+        /// Helper class to get a version string (major.minor.build; revision only if non-zero).
         /// </summary>
         /// <param name="version">A string representing version.</param>
-        /// <returns>A string without trailing zeros (ex: 2.3 and not 2.3.0.0).</returns>
+        /// <returns>A display string (ex: 2.0.0 or 1.19.2).</returns>
         public static string GetVersionString(string version)
         {
-            return GetVersionString(Version.Parse(version));
+            return GetVersionString(GetVersion(version));
         }
     }
 }
