@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
@@ -71,6 +71,7 @@
       <SpecificVersion>False</SpecificVersion>
       <HintPath>.\DiscordRPC.dll</HintPath>
     </Reference>
+    <Reference Include="System.Web.Extensions" />
     <Reference Include="System" />
     <Reference Include="System.Configuration" />
     <Reference Include="System.Core" />
@@ -108,6 +109,27 @@
     <Compile Include="PipeSelector.Designer.cs">
       <DependentUpon>PipeSelector.cs</DependentUpon>
     </Compile>
+    <Compile Include="MainForm.Slots.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="MainForm.RpcMode.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="MainForm.Layout.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="ActivitiesUiText.cs" />
+    <Compile Include="ActivitiesInfoContent.cs" />
+    <Compile Include="TooltipLine.cs" />
+    <Compile Include="TooltipPainter.cs" />
+    <Compile Include="DarkToolTipHelper.cs" />
+    <Compile Include="DarkHoverPopup.cs" />
+    <Compile Include="MultiSlotRpcMode.cs" />
+    <Compile Include="DiscordRpcProcessIdHelper.cs" />
+    <Compile Include="PresenceBuilder.cs" />
+    <Compile Include="PresenceSlot.cs" />
+    <Compile Include="PresenceSlotService.cs" />
+    <Compile Include="SlotStorage.cs" />
     <Compile Include="MainForm.cs">
       <SubType>Form</SubType>
     </Compile>
