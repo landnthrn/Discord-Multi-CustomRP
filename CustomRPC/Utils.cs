@@ -32,15 +32,31 @@ namespace CustomRPC
             {
                 var attribute = DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1;
                 if (IsWindows10OrGreater(18985))
-                {
                     attribute = DWMWA_USE_IMMERSIVE_DARK_MODE;
-                }
 
                 int useImmersiveDarkMode = Properties.Settings.Default.darkMode ? 1 : 0;
                 return DwmSetWindowAttribute(handle, attribute, ref useImmersiveDarkMode, sizeof(int)) == 0;
             }
 
             return false;
+        }
+
+        [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+        private static extern int SetWindowTheme(IntPtr hwnd, string pszSubAppName, string pszSubIdList);
+
+        public static void ApplyListViewDarkScrollbars(Control listView)
+        {
+            if (listView == null || !Properties.Settings.Default.darkMode)
+                return;
+
+            void Apply(object sender, EventArgs e)
+            {
+                if (listView.IsHandleCreated)
+                    SetWindowTheme(listView.Handle, "DarkMode_Explorer", null);
+            }
+
+            Apply(null, EventArgs.Empty);
+            listView.HandleCreated += Apply;
         }
 
         private static bool IsWindows10OrGreater(int build = -1)

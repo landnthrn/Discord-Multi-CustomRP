@@ -1,4 +1,4 @@
-﻿using System.Drawing;
+using System.Drawing;
 using System.Windows.Forms;
 
 namespace CustomRPC
@@ -15,10 +15,16 @@ namespace CustomRPC
         public static Color CheckHover => Color.FromArgb(72, 86, 193);
         public static Color TextInactive => Color.FromArgb(142, 146, 151);
         public static Color BgColor { get; private set; }
+        public static Color BgButton { get; private set; }
+        public static Color BgButtonMouseOver { get; private set; }
+        public static Color BgButtonMouseDown { get; private set; }
         public static Color BgTextFields { get; private set; }
         public static Color BgTextFieldsSuccess { get; private set; }
         public static Color BgTextFieldsError { get; private set; }
+        public static Color BgTextFieldsDuplicateId { get; private set; }
         public static Color TextColor { get; private set; }
+        public static Color BgListSelected => Color.FromArgb(42, 44, 48);
+        public static Color BgListSelectedInactive => BgListSelected;
 
         static CurrentColors()
         {
@@ -33,17 +39,25 @@ namespace CustomRPC
             if (Properties.Settings.Default.darkMode)
             {
                 BgColor = Color.FromArgb(55, 57, 63);
+                BgButton = Color.FromArgb(24, 25, 28);
+                BgButtonMouseOver = Color.FromArgb(72, 86, 193);
+                BgButtonMouseDown = Color.FromArgb(61, 73, 162);
                 BgTextFields = Color.FromArgb(65, 68, 75);
                 BgTextFieldsSuccess = Color.FromArgb(50, 150, 50);
                 BgTextFieldsError = Color.FromArgb(150, 50, 50);
+                BgTextFieldsDuplicateId = Color.FromArgb(130, 45, 45);
                 TextColor = Color.White;
             }
             else
             {
                 BgColor = Color.FromArgb(255, 255, 255);
+                BgButton = SystemColors.Control;
+                BgButtonMouseOver = SystemColors.ControlLight;
+                BgButtonMouseDown = SystemColors.ControlDark;
                 BgTextFields = Color.FromArgb(235, 237, 239);
                 BgTextFieldsSuccess = Color.FromArgb(192, 255, 192);
                 BgTextFieldsError = Color.FromArgb(255, 192, 192);
+                BgTextFieldsDuplicateId = Color.FromArgb(255, 180, 180);
                 TextColor = Color.FromName("ControlText");
             }
         }
@@ -71,6 +85,9 @@ namespace CustomRPC
 
         protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
         {
+            if (e.ToolStrip is StatusStrip)
+                return;
+
             base.OnRenderToolStripBorder(e);
 
             e.Graphics.DrawRectangle(new Pen(CurrentColors.BgActive, 2), e.AffectedBounds);
@@ -112,8 +129,32 @@ namespace CustomRPC
         }
     }
 
+    internal static class ControlThemeHelper
+    {
+        public static void EnableListViewDoubleBuffer(ListView listView)
+        {
+            if (listView == null)
+                return;
+
+            typeof(Control).InvokeMember(
+                "DoubleBuffered",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.SetProperty,
+                null,
+                listView,
+                new object[] { true });
+        }
+    }
+
     internal class LightModeRenderer : ToolStripProfessionalRenderer
     {
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+        {
+            if (e.ToolStrip is StatusStrip)
+                return;
+
+            base.OnRenderToolStripBorder(e);
+        }
+
         protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
         {
             e.ToolStrip.BackColor = Color.FromArgb(242, 243, 245);
