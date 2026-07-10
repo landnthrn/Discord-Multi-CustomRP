@@ -1,4 +1,4 @@
-﻿using CommonMark;
+using CommonMark;
 using DiscordRPC;
 using DiscordRPC.Helper;
 using Microsoft.AppCenter.Analytics;
@@ -18,7 +18,6 @@ using System.Windows.Forms;
 using System.Xml.Serialization;
 using Application = System.Windows.Forms.Application;
 using Button = System.Windows.Forms.Button;
-using DButton = DiscordRPC.Button;
 using Timer = System.Timers.Timer;
 
 namespace CustomRPC
@@ -113,15 +112,12 @@ namespace CustomRPC
 
     public partial class MainForm : Form
     {
-        /// <summary>
-        /// Discord RPC Client.
-        /// </summary>
-        DiscordRpcClient client;
+        const string MultiSlotPresetExtension = ".cmrp";
+        const string LegacyMultiSlotPresetExtension = ".mrp";
 
-        /// <summary>
-        /// List of presence buttons.
-        /// </summary>
-        List<DButton> buttonsList = new List<DButton>();
+        static bool IsMultiSlotPresetFile(string path) =>
+            path.EndsWith(MultiSlotPresetExtension, StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(LegacyMultiSlotPresetExtension, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
         /// Prevents some event handlers from executing while the app is loading.
@@ -141,20 +137,7 @@ namespace CustomRPC
         bool wasTooltipShown = false;
 
         /// <summary>
-        /// A timer for automatic restart on connection error. Currently set to 10 seconds.
-        /// </summary>
-        Timer restartTimer = new Timer(10 * 1000);
-        /// <summary>
-        /// Limit for the amount of restart tries.
-        /// </summary>
-        int restartAttempts = 30;
-        /// <summary>
-        /// Counter for restart attempts left.
-        /// </summary>
-        int restartAttemptsLeft = -1;
-
-        /// <summary>
-        /// A timer that updates presence at midnight.
+        /// A timer that updates presence at midnight for local-time slots.
         /// </summary>
         Timer localTimeTimer = new Timer();
 
@@ -186,16 +169,6 @@ namespace CustomRPC
         /// Has the form of empty string if the app is in English or the docs aren't translated to the current UI language, "v/[locale]/" or "v/[locale]-[country]/" otherwise.
         /// </summary>
         string localeUrl = "";
-
-        /// <summary>
-        /// Timestamp of when was the last time app was connected to Discord.
-        /// </summary>
-        DateTime timestampConnected = DateTime.UtcNow;
-
-        /// <summary>
-        /// Timestamp of when the app started.
-        /// </summary>
-        readonly DateTime timestampStarted = DateTime.UtcNow;
 
         /// <summary>
         /// Path to the autorun link file.
@@ -237,10 +210,6 @@ namespace CustomRPC
         /// Unicode character "No-Break Space" (" ").
         /// </summary>
         readonly string U00A0 = "\u00A0";
-        /// <summary>
-        /// Unicode character "Zero-Width Space" (invisible).
-        /// </summary>
-        readonly string U200B = "\u200B";
 
         /// <summary>
         /// Default ID to connect with if the user doesn't provide any.
@@ -269,17 +238,12 @@ namespace CustomRPC
             StartupSetup();
 #endif
 
-            // Setting up a restart timer
-            restartTimer.AutoReset = false;
-            restartTimer.Elapsed += RestartTimer_Elapsed;
-
             // Setting up a midnight presence update timer
             localTimeTimer.AutoReset = false;
             localTimeTimer.Elapsed += LocalTimeTimer_Elapsed;
 
-            // If we supply a preset file to import on load, load it right away
-            if (preset is string)
-                LoadPreset(preset);
+            // Defer preset import until the slot system exists (CLI / drag-drop on startup).
+            string startupPresetPath = preset as string;
 
             // Setting up checkboxes because apparently property binding doesn't work
             runOnStartupToolStripMenuItem.Checked = settings.runOnStartup;
@@ -371,15 +335,14 @@ namespace CustomRPC
             dateTimePickerTimestampStart.MinDate = dateTimePickerTimestampEnd.MinDate =
                 new DateTime(1970, 1, 1, 0, 0, 1, DateTimeKind.Utc).ToLocalTime();
 
-            // Localize the header of the tooltip because Visual Studio can't do that for some reason
-            toolTipInfo.ToolTipTitle = Strings.information;
-
             // Localize the Disconnect button in the tray menu, unless it is already localized
             if (trayMenuDisconnect.Text == res.GetString("trayMenuDisconnect.Text", CultureInfo.GetCultureInfo("en")))
                 trayMenuDisconnect.Text = res.GetString("buttonDisconnect.Text");
 
             // Localize the statusbar text in case the autoconnect is disabled
             toolStripStatusLabelStatus.Text = Strings.statusDisconnected;
+
+            DarkToolTipHelper.Configure(toolTipInfo);
 
             // Add version info to main window title
             Text += " " + VersionHelper.GetVersionString(Application.ProductVersion);
@@ -413,6 +376,11 @@ namespace CustomRPC
 
             loading = false;
 
+            InitializeSlotSystem();
+
+            if (!string.IsNullOrEmpty(startupPresetPath))
+                LoadPreset(startupPresetPath);
+
             // Starts minimized to tray by default, unless you just changed language
             if (settings.changedLanguage || !settings.startMinimized)
                 Show();
@@ -438,7 +406,7 @@ namespace CustomRPC
             }
 
             if ((settings.changedLanguage && settings.wasConnected) || (settings.autoconnect && !settings.changedLanguage))
-                Connect();
+                AutoconnectOnStartup();
 
             CheckIfCrashed();
 
@@ -463,6 +431,7 @@ namespace CustomRPC
             }
             else if (message.Msg == 0x0016) // WM_ENDSESSION
             {
+                SaveSlotsToStorage();
                 Utils.SaveSettings();
                 Application.Exit();
             }
@@ -501,19 +470,29 @@ namespace CustomRPC
                     panel.BackColor = CurrentColors.TextColor;
             }
 
-            switch (ConnectionManager.State)
+            if (slotService != null)
             {
-                case ConnectionState.Disconnected:
-                case ConnectionState.Connecting:
-                case ConnectionState.UpdatingPresence:
-                    textBoxID.BackColor = CurrentColors.BgTextFields;
-                    break;
-                case ConnectionState.Connected:
-                    textBoxID.BackColor = CurrentColors.BgTextFieldsSuccess;
-                    break;
-                case ConnectionState.Error:
-                    textBoxID.BackColor = CurrentColors.BgTextFieldsError;
-                    break;
+                switch (ConnectionManager.State)
+                {
+                    case ConnectionState.Disconnected:
+                    case ConnectionState.Connecting:
+                    case ConnectionState.UpdatingPresence:
+                        if (GetSelectedSlot()?.IsConnected != true)
+                            textBoxID.BackColor = CurrentColors.BgTextFields;
+                        break;
+                    case ConnectionState.Connected:
+                        if (GetSelectedSlot()?.IsConnected == true)
+                            textBoxID.BackColor = CurrentColors.BgTextFieldsSuccess;
+                        break;
+                    case ConnectionState.Error:
+                        if (GetSelectedSlot()?.ConnectionState == SlotConnectionState.Error)
+                            textBoxID.BackColor = CurrentColors.BgTextFieldsError;
+                        break;
+                }
+            }
+            else
+            {
+                textBoxID.BackColor = CurrentColors.BgTextFields;
             }
 
             if (settings.darkMode)
@@ -526,34 +505,22 @@ namespace CustomRPC
                 ToolStripManager.Renderer = new LightModeRenderer();
                 buttonConnect.FlatStyle = buttonDisconnect.FlatStyle = buttonUpdatePresence.FlatStyle = FlatStyle.Standard;
             }
+
+            ApplyActivitiesPanelTheme();
         }
 
-        /// <summary>
-        /// Will be called 10 seconds after a failed connection to try and reconnect.
-        /// </summary>
-        private void RestartTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
+        void ClearActionButtonFocus(object sender, EventArgs e)
         {
-            if (restartAttemptsLeft == 0)
-            {
-                restartAttemptsLeft = -1;
-                Invoke(new MethodInvoker(() => Disconnect()));
-                return;
-            }
-
-            if (restartAttemptsLeft == -1)
-                restartAttemptsLeft = restartAttempts;
-
-            restartAttemptsLeft--;
-
-            Invoke(new MethodInvoker(() => Connect()));
+            if (ActiveControl is Button && buttonFocusSink != null)
+                buttonFocusSink.Focus();
         }
 
         /// <summary>
-        /// Will be called at midnight to update presence.
+        /// Will be called at midnight to update local-time presence slots.
         /// </summary>
         private void LocalTimeTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
         {
-            Invoke(new MethodInvoker(() => SetPresence()));
+            Invoke(new MethodInvoker(() => UpdateAllEnabledSlots()));
         }
 
         /// <summary>
@@ -719,366 +686,16 @@ namespace CustomRPC
         }
 
         /// <summary>
-        /// Initializes connection to the Discord API.
+        /// Sets up new presence from the selected slot.
         /// </summary>
-        /// <returns><see langword="False"/> if ID isn't set or something happened when establishing the connection, otherwise <see langword="true"/>.</returns>
-        private bool Init()
-        {
-            string id = settings.id != "" ? settings.id : defaultID;
-
-            if (client != null && !client.IsDisposed)
-                client.Dispose(); // This stuff needs proper disposal
-
-            client = new DiscordRpcClient(id, (int)settings.pipe); // Assigning the ID
-            client.OnPresenceUpdate += ClientOnPresenceUpdate;
-            client.OnError += ClientOnError;
-            client.OnConnectionFailed += ClientOnConnFailed;
-            client.OnReady += ClientOnReady;
-
-            client.Logger = new TimestampFileLogger(Application.StartupPath + "\\logs");
-
-            return client.Initialize();
-        }
-
-        /// <summary>
-        /// Will be called if successfully connected and sent the presence payload.
-        /// </summary>
-        private void ClientOnPresenceUpdate(object sender, DiscordRPC.Message.PresenceMessage args)
-        {
-            var presence = client.CurrentPresence;
-
-            ConnectionManager.State = ConnectionState.Connected;
-
-            Invoke(new MethodInvoker(() =>
-            {
-                textBoxID.BackColor = CurrentColors.BgTextFieldsSuccess;
-                toolStripStatusLabelStatus.Text = Strings.statusConnected;
-            }));
-
-            // This only tracks whether or not the presence has those parameters set, not their content
-            Analytics.TrackEvent("Updated presence", new Dictionary<string, string> {
-                { "Party", presence.HasParty().ToString() },
-                { "Timestamp", ((TimestampType)settings.timestamps).ToString() },
-                { "Big image", (!string.IsNullOrEmpty(presence.Assets?.LargeImageID)).ToString() },
-                { "Small image", (!string.IsNullOrEmpty(presence.Assets?.SmallImageID)).ToString() },
-                { "Buttons", buttonsList.Count.ToString() }
-            });
-
-            restartTimer.Stop();
-        }
-
-        /// <summary>
-        /// Will be called if failed connecting (due to bad app id or anything else).
-        /// </summary>
-        private void ClientOnError(object sender, DiscordRPC.Message.ErrorMessage args)
-        {
-            ConnectionManager.State = ConnectionState.Error;
-
-            Invoke(new MethodInvoker(() =>
-            {
-                if (buttonConnect.Enabled) // Ignore if the user disconnected before connection was established
-                    return;
-
-                textBoxID.BackColor = CurrentColors.BgTextFieldsError;
-                toolStripStatusLabelStatus.Text = Strings.statusError;
-                if (args.Code != DiscordRPC.Message.ErrorCode.UnknownError)
-                    MessageBox.Show(this, args.Message, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }));
-
-            if (ConnectionManager.HasChanged()) // Ignore repeated calls caused by auto reconnect
-                Analytics.TrackEvent("Connection error");
-
-            restartTimer.Start();
-        }
-
-        /// <summary>
-        /// Will be called if failed connecting (usually due to Discord being closed).
-        /// </summary>
-        private void ClientOnConnFailed(object sender, DiscordRPC.Message.ConnectionFailedMessage args)
-        {
-            Invoke(new MethodInvoker(() =>
-            {
-                if (buttonConnect.Enabled) // Ignore if the user disconnected before connection was established
-                    return;
-
-                textBoxID.BackColor = CurrentColors.BgTextFieldsError;
-                toolStripStatusLabelStatus.Text = Strings.statusConnectionFailed;
-            }));
-
-            ConnectionManager.State = ConnectionState.Error;
-
-            if (ConnectionManager.HasChanged()) // Ignore repeated calls caused by auto reconnect
-                Analytics.TrackEvent("Connection failed");
-
-            restartTimer.Start();
-        }
-
-        /// <summary>
-        /// Will be called as soon as CustomRP connects to Discord.
-        /// </summary>
-        private void ClientOnReady(object sender, DiscordRPC.Message.ReadyMessage args)
-        {
-            Invoke(new MethodInvoker(() =>
-            {
-                toolStripStatusLabelUsername.Text = client.CurrentUser.Username;
-                trayIcon.Text = $"{res.GetString("trayIcon.Text")}{(Program.IsSecondInstance ? " (2)" : "")}\n{client.CurrentUser.Username}";
-
-                buttonUpdatePresence.Enabled = true;
-
-                ConnectionManager.State = ConnectionState.UpdatingPresence;
-                toolStripStatusLabelStatus.Text = Strings.statusUpdatingPresence;
-
-                SetPresence();
-            }));
-        }
-
-        /// <summary>
-        /// Sets up new presence from the settings.
-        /// </summary>
-        /// <returns><see langword="True"/> if presence was successfully set, <see langword="false"/> otherwise.</returns>
         private bool SetPresence()
         {
-            if (client == null || client.IsDisposed)
+            var slot = GetSelectedSlot();
+            if (slot == null || !slot.IsConnected)
                 return false;
 
-            localTimeTimer.Stop();
-
-            // Add ZWS character if details or state textboxes start a no-break space character
-            foreach (var paramBox in new[] { textBoxDetails, textBoxState })
-            {
-                if (paramBox.Text.StartsWith(U00A0) && paramBox.Text.Length < paramBox.MaxLength)
-                    paramBox.Text = paramBox.Text.Insert(0, U200B);
-                // In case it doesn't fit but there's at least 2 space symbols, we can replace one of them with the zws
-                else if (paramBox.Text.StartsWith(U00A0 + U00A0))
-                    paramBox.Text = U200B + paramBox.Text.Substring(1);
-                // In case it still doesn't fit, why would you even use spaces then, 128 characters is a long string
-            }
-
-            if (settings.partySize > settings.partyMax)
-                settings.partyMax = settings.partySize;
-
-            settings.detailsURL = settings.detailsURL.Trim();
-            settings.stateURL = settings.stateURL.Trim();
-            settings.largeKey = settings.largeKey.Trim();
-            settings.largeURL = settings.largeURL.Trim();
-            settings.smallKey = settings.smallKey.Trim();
-            settings.smallURL = settings.smallURL.Trim();
-            settings.button1URL = settings.button1URL.Trim();
-            settings.button2URL = settings.button2URL.Trim();
-
-            var rp = new RichPresence()
-            {
-                Name = settings.name,
-                Type = (ActivityType)settings.type,
-                StatusDisplay = (StatusDisplayType)settings.display,
-                Details = settings.details,
-                State = settings.state,
-                Party = new Party()
-                {
-                    ID = (settings.partySize > 0 && settings.partyMax > 0) ? "CustomRP" : "",
-                    Size = (int)settings.partySize,
-                    Max = (int)settings.partyMax
-                },
-            };
-
-            Uri tempUri;
-
-            /* Unused
-            string GetProcessedURL(Uri origUri)
-            {
-                if (!origUri.Host.Contains("discordapp"))
-                    return origUri.AbsoluteUri;
-
-                var newUri = new UriBuilder(origUri.AbsoluteUri);
-                var newQuery = origUri.ParseQueryString();
-
-                newQuery.Remove("ex");
-                newQuery.Remove("is");
-                newQuery.Remove("hm");
-                newUri.Query = newQuery.ToString();
-
-                return newUri.Uri.AbsoluteUri;
-            }
-            */
-
-            string ProcessURL(string url, int maxLength)
-            {
-                if (string.IsNullOrEmpty(url))
-                    return url;
-
-                if (!url.Contains("://"))
-                    url = "https://" + url;
-
-                try
-                {
-                    if (Uri.TryCreate(url, UriKind.Absolute, out tempUri))
-                        url = tempUri.AbsoluteUri.Replace(tempUri.Host, tempUri.IdnHost);
-                }
-                catch
-                {
-                    // Sometimes TryCreate throws errors, even when it's not supposed to, so we can just let it fail quietly
-                }
-
-                return url.Substring(0, Math.Min(maxLength, url.Length));
-            }
-
-            settings.detailsURL = ProcessURL(settings.detailsURL, textBoxDetailsURL.MaxLength);
-            settings.stateURL = ProcessURL(settings.stateURL, textBoxStateURL.MaxLength);
-
-            try
-            {
-                rp.DetailsUrl = settings.detailsURL;
-                rp.StateUrl = settings.stateURL;
-            }
-            catch (Exception e)
-            {
-                MessageBox.Show(e.Message, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1);
-
-                return false;
-            }
-
-            string Proxify(string key)
-            {
-                if (key != null)
-                    return Regex.Replace(key, @"//((cdn)|(media))\.discordapp\.((com)|(net))/", "//customrp.xyz/proxy/");
-
-                return key;
-            };
-
-            try
-            {
-                // Thank you Discord, very cool
-                bool IsMpExternalStringOverLimit(Uri uri)
-                {
-                    return $"mp:external/43 characters that probably represent an id/{Uri.EscapeDataString(uri.Query)}/{uri.Scheme}/{(uri.IdnHost == "media.discordapp.net" ? "cdn.discordapp.com" : uri.IdnHost)}{uri.AbsolutePath}".Length > 256;
-                }
-
-                if (Uri.TryCreate(settings.smallKey, UriKind.Absolute, out tempUri))
-                {
-                    if (IsMpExternalStringOverLimit(tempUri))
-                        throw new ArgumentException("Small");
-
-                    settings.smallKey = tempUri.AbsoluteUri.Replace(tempUri.Host, tempUri.IdnHost);
-                }
-
-                if (Uri.TryCreate(settings.largeKey, UriKind.Absolute, out tempUri))
-                {
-                    if (IsMpExternalStringOverLimit(tempUri))
-                        throw new ArgumentException("Large");
-
-                    settings.largeKey = tempUri.AbsoluteUri.Replace(tempUri.Host, tempUri.IdnHost);
-                }
-
-                settings.largeURL = ProcessURL(settings.largeURL, textBoxLargeURL.MaxLength);
-                settings.smallURL = ProcessURL(settings.smallURL, textBoxSmallURL.MaxLength);
-
-                rp.Assets = new Assets()
-                {
-                    LargeImageKey = Proxify(settings.largeKey),
-                    LargeImageText = settings.largeText,
-                    LargeImageUrl = settings.largeURL,
-                    SmallImageKey = Proxify(settings.smallKey),
-                    SmallImageText = settings.smallText,
-                    SmallImageUrl = settings.smallURL,
-                };
-            }
-            catch (Exception e)
-            {
-                if (e is ArgumentException)
-                    MessageBox.Show(Strings.errorInvalidImageURL + " (" + res.GetString("label" + e.Message + ".Text") + ")", Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1);
-                else
-                    MessageBox.Show(e.Message, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1);
-
-                return false;
-            }
-            finally
-            {
-                Utils.SaveSettings();
-            }
-
-            buttonsList.Clear();
-
-            settings.button1URL = ProcessURL(settings.button1URL, textBoxButton1URL.MaxLength);
-            settings.button2URL = ProcessURL(settings.button2URL, textBoxButton2URL.MaxLength);
-
-            Utils.SaveSettings();
-
-            // This try block technically isn't necessary, except if you screw up URL field processing (ask me how I know)
-            try
-            {
-                if (settings.button1Text != "" && settings.button1URL != "")
-                    buttonsList.Add(new DButton()
-                    {
-                        Label = settings.button1Text,
-                        Url = settings.button1URL
-                    });
-
-                if (settings.button2Text != "" && settings.button2URL != "")
-                    buttonsList.Add(new DButton()
-                    {
-                        Label = settings.button2Text,
-                        Url = settings.button2URL
-                    });
-            }
-            catch 
-            {
-                MessageBox.Show(Strings.errorInvalidURL, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1);
-                return false;
-            }
-
-            rp.Buttons = buttonsList.ToArray();
-
-            switch ((TimestampType)settings.timestamps)
-            {
-                case TimestampType.SinceLastConnection: rp.Timestamps = new Timestamps(timestampConnected); break;
-                case TimestampType.SinceStartup: rp.Timestamps = new Timestamps(timestampStarted); break;
-                case TimestampType.SincePresenceUpdate: rp.Timestamps = Timestamps.Now; break;
-                case TimestampType.LocalTime:
-                    rp.Timestamps = new Timestamps(DateTime.UtcNow.Subtract(new TimeSpan(DateTime.Now.Hour, DateTime.Now.Minute, DateTime.Now.Second)));
-                    localTimeTimer.Interval = DateTime.Today.AddDays(1).AddSeconds(5).Subtract(DateTime.Now).TotalMilliseconds;
-                    break;
-                case TimestampType.Custom:
-                    DateTime customTimestampStart = dateTimePickerTimestampStart.Value.ToUniversalTime();
-                    DateTime customTimestampEnd = dateTimePickerTimestampEnd.Value.ToUniversalTime();
-                    /* Not needed anymore
-                    /// I must apologize preemptively for this monster of an if-statement
-                    /// Timestamps before 2001-09-09 01:46:40 UTC only work if you have a "dumb" presence (the one that only has ID,
-                    /// timestamp and small image fields set)
-                    /// Technically, it doesn't even matter what date you put in the rich presence timestamp, since it only shows the hours
-                    /// since/to the timestamp
-                    if (customTimestampStart.CompareTo(new DateTime(2001, 9, 9, 1, 46, 40, DateTimeKind.Utc)) < 0 &&
-                        !(string.IsNullOrEmpty(settings.details) && string.IsNullOrEmpty(settings.state) && settings.partySize == 0 &&
-                        settings.partyMax == 0 && string.IsNullOrEmpty(settings.largeKey) && string.IsNullOrEmpty(settings.largeText) &&
-                        string.IsNullOrEmpty(settings.smallText) && string.IsNullOrEmpty(settings.button1Text) &&
-                        string.IsNullOrEmpty(settings.button1URL) && string.IsNullOrEmpty(settings.button2Text) &&
-                        string.IsNullOrEmpty(settings.button2URL)))
-                    {
-                        customTimestampStart = new DateTime(2002, 1, 1, customTimestampStart.Hour, customTimestampStart.Minute, customTimestampStart.Second, DateTimeKind.Utc);
-                    */
-                    if (checkBoxTimestampEnd.Checked)
-                        rp.Timestamps = new Timestamps(customTimestampStart, customTimestampEnd);
-                    else
-                        rp.Timestamps = customTimestampStart.CompareTo(DateTime.UtcNow) < 0
-                            ? new Timestamps(customTimestampStart) : new Timestamps(DateTime.UtcNow, customTimestampStart);
-                    break;
-            }
-
-            try
-            {
-                client.SetPresence(rp);
-                ConnectionManager.State = ConnectionState.UpdatingPresence;
-                toolStripStatusLabelStatus.Text = Strings.statusUpdatingPresence;
-            }
-            catch (Exception e)
-            {
-                MessageBox.Show(e.Message, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return false;
-            }
-            
-            if ((TimestampType)settings.timestamps == TimestampType.LocalTime)
-                localTimeTimer.Start();
-
-            return true;
+            SaveSlotsToStorage();
+            return SetPresenceForSlot(slot);
         }
 
         /// <summary>
@@ -1127,8 +744,27 @@ namespace CustomRPC
         /// </summary>
         private void DragDropHandler(object sender, DragEventArgs e)
         {
-            if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0)
-                LoadPreset(files[0]); // If multiple files are passed, only the first one gets imported
+            if (!(e.Data.GetData(DataFormats.FileDrop) is string[] files) || files.Length == 0)
+                return;
+
+            var crpFiles = files.Where(f => f.EndsWith(".crp", StringComparison.OrdinalIgnoreCase)).ToArray();
+            var multiSlotPresetFiles = files.Where(f => IsMultiSlotPresetFile(f)).ToArray();
+
+            if (multiSlotPresetFiles.Length > 0)
+            {
+                LoadMultiSlotPresetFile(multiSlotPresetFiles[0]);
+                return;
+            }
+
+            if (crpFiles.Length > 1)
+            {
+                foreach (var file in crpFiles)
+                    LoadPreset(file, addAsNewSlot: true);
+                return;
+            }
+
+            if (crpFiles.Length == 1)
+                LoadPreset(crpFiles[0]);
         }
 
         /// <summary>
@@ -1138,6 +774,8 @@ namespace CustomRPC
         {
             if (e.CloseReason == CloseReason.UserClosing) // Checks if it was closed by user and not by system in a shutdown, for example
             {
+                SaveSlotsToStorage();
+
                 // Prevent closing and hide the window to tray instead
                 e.Cancel = true;
                 Hide();
@@ -1205,85 +843,39 @@ namespace CustomRPC
             if (MessageBox.Show(this, Strings.newPresetConfirmation, Application.ProductName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
                 return;
 
-            if (ConnectionManager.State != ConnectionState.Disconnected)
-                Disconnect();
-
-            textBoxID.Text = textBoxName.Text =
-                textBoxDetails.Text = textBoxDetailsURL.Text =
-                textBoxState.Text = textBoxStateURL.Text =
-                comboBoxLargeKey.Text = comboBoxSmallKey.Text =
-                textBoxLargeText.Text = textBoxSmallText.Text =
-                textBoxLargeURL.Text = textBoxSmallURL.Text =
-                textBoxButton1Text.Text = textBoxButton1URL.Text =
-                textBoxButton2Text.Text = textBoxButton2URL.Text = "";
-            comboBoxType.SelectedValue = ActivityType.Playing;
-            comboBoxDisplay.SelectedValue = StatusDisplayType.Name;
-            numericUpDownPartySize.Value = numericUpDownPartyMax.Value = 0;
-            radioButtonLastConnection.Checked = true;
-            checkBoxTimestampEnd.Checked = false;
+            ApplyNewPreset();
         }
 
         /// <summary>
         /// Base function for loading a preset.
         /// </summary>
         /// <param name="file">A file stream of the preset file.</param>
-        private void LoadPreset(Stream file)
+        private void LoadPreset(Stream file, bool addAsNewSlot = false)
         {
             try
             {
-                var xs = new XmlSerializer(typeof(Preset)); // Using XML here because... why not? Settings are already saved in XML
+                var xs = new XmlSerializer(typeof(Preset));
                 var preset = (Preset)xs.Deserialize(file);
 
-                bool wasConnected = buttonDisconnect.Enabled;
-                bool isNewID = settings.id != preset.ID;
+                var slot = GetSelectedSlot();
+                bool wasConnected = slot?.IsConnected == true;
+                bool isNewID = slot != null && slot.ApplicationId != preset.ID;
 
-                settings.id = preset.ID ?? "";
-                settings.type = preset.Type;
-                settings.display = preset.Display;
-                settings.name = preset.Name ?? "";
-                settings.details = preset.Details ?? "";
-                settings.detailsURL = preset.DetailsURL ?? "";
-                settings.state = preset.State ?? "";
-                settings.stateURL = preset.StateURL ?? "";
-                settings.partySize = preset.PartySize;
-                settings.partyMax = preset.PartyMax;
-                settings.timestamps = preset.Timestamps;
-                settings.customTimestamp = preset.CustomTimestamp;
-                settings.customTimestampEndEnabled = preset.CustomTimestampEndEnabled;
-                settings.customTimestampEnd = preset.CustomTimestampEnd;
-                settings.largeKey = preset.LargeKey ?? "";
-                settings.largeText = preset.LargeText ?? "";
-                settings.largeURL = preset.LargeURL ?? "";
-                settings.smallKey = preset.SmallKey ?? "";
-                settings.smallText = preset.SmallText ?? "";
-                settings.smallURL = preset.SmallURL ?? "";
-                settings.button1Text = preset.Button1Text ?? "";
-                settings.button1URL = preset.Button1URL ?? "";
-                settings.button2Text = preset.Button2Text ?? "";
-                settings.button2URL = preset.Button2URL ?? "";
-                Utils.SaveSettings();
-
-                comboBoxType.SelectedValue = (ActivityType)settings.type;
-                comboBoxDisplay.SelectedValue = (StatusDisplayType)settings.display;
-
-                switch ((TimestampType)settings.timestamps)
-                {
-                    case TimestampType.SinceLastConnection: radioButtonLastConnection.Checked = true; break;
-                    case TimestampType.SincePresenceUpdate: radioButtonPresence.Checked = true; break;
-                    case TimestampType.SinceStartup: radioButtonStartTime.Checked = true; break;
-                    case TimestampType.LocalTime: radioButtonLocalTime.Checked = true; break;
-                    case TimestampType.Custom: radioButtonCustom.Checked = true; break;
-                }
+                ImportPresetAsSlot(preset, addAsNewSlot);
 
                 Analytics.TrackEvent("Loaded a preset");
 
                 if (!wasConnected)
                     return;
 
-                if (isNewID || ConnectionManager.State != ConnectionState.Connected)
-                    Reconnect();
+                var imported = GetSelectedSlot();
+                if (imported == null)
+                    return;
+
+                if (isNewID || !imported.IsConnected)
+                    slotService.ReconnectSlot(imported);
                 else
-                    SetPresence();
+                    SetPresenceForSlot(imported);
             }
             catch
             {
@@ -1302,7 +894,8 @@ namespace CustomRPC
         {
             var presetFile = new OpenFileDialog()
             {
-                Filter = "CustomRP Preset|*.crp"
+                Filter = "Multi Activity Preset|*.cmrp|CustomRP Preset|*.crp|All supported|*.cmrp;*.crp;*.mrp",
+                Multiselect = true,
             };
 
             if (presetFile.ShowDialog() != DialogResult.OK)
@@ -1310,7 +903,18 @@ namespace CustomRPC
 
             try
             {
-                LoadPreset(presetFile.OpenFile());
+                if (presetFile.FileNames.Length > 1)
+                {
+                    foreach (var file in presetFile.FileNames)
+                        LoadPreset(file, addAsNewSlot: true);
+                    return;
+                }
+
+                var filePath = presetFile.FileName;
+                if (IsMultiSlotPresetFile(filePath))
+                    LoadMultiSlotPresetFile(filePath);
+                else
+                    LoadPreset(File.OpenRead(filePath));
             }
             catch
             {
@@ -1322,11 +926,32 @@ namespace CustomRPC
         /// Loads preset from a file.
         /// </summary>
         /// <param name="filePath">The path to the preset file.</param>
-        private void LoadPreset(string filePath)
+        private void LoadPreset(string filePath, bool addAsNewSlot = false)
         {
             try
             {
-                LoadPreset(File.OpenRead(filePath));
+                if (IsMultiSlotPresetFile(filePath))
+                    LoadMultiSlotPresetFile(filePath);
+                else
+                    LoadPreset(File.OpenRead(filePath), addAsNewSlot);
+            }
+            catch
+            {
+                MessageBox.Show(Strings.errorInvalidPresetFile, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        void LoadMultiSlotPresetFile(string filePath)
+        {
+            try
+            {
+                var serializer = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+                var preset = serializer.Deserialize<MultiSlotPreset>(File.ReadAllText(filePath));
+                if (preset?.Slots == null || preset.Slots.Length == 0)
+                    throw new InvalidDataException();
+
+                LoadMultiSlotPreset(preset);
+                Analytics.TrackEvent("Loaded a multi-slot preset");
             }
             catch
             {
@@ -1342,7 +967,10 @@ namespace CustomRPC
             var xs = new XmlSerializer(typeof(Preset));
             var presetFile = new SaveFileDialog()
             {
-                Filter = "CustomRP Preset|*.crp"
+                Filter = slotService.Slots.Count > 1
+                    ? "Multi Activity Preset|*.cmrp|CustomRP Preset|*.crp|All supported|*.cmrp;*.crp"
+                    : "CustomRP Preset|*.crp|Multi Activity Preset|*.cmrp|All supported|*.crp;*.cmrp",
+                DefaultExt = slotService.Slots.Count > 1 ? "cmrp" : "crp",
             };
 
             if (presetFile.ShowDialog() != DialogResult.OK || presetFile.FileNames.Length == 0)
@@ -1352,35 +980,33 @@ namespace CustomRPC
             {
                 try
                 {
-                    using (var file = presetFile.OpenFile())
+                    SaveEditorToSelectedSlot();
+
+                    string savePath = presetFile.FileName;
+                    if (!IsMultiSlotPresetFile(savePath) &&
+                        slotService.Slots.Count > 1 &&
+                        MessageBox.Show(
+                            this,
+                            "You have multiple activities. Multi-activity presets must use the .cmrp format to save all of them.\n\nSave as .cmrp now?",
+                            Strings.information,
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Information) == DialogResult.Yes)
                     {
-                        xs.Serialize(file, new Preset()
-                        {
-                            ID = settings.id,
-                            Type = settings.type,
-                            Display = settings.display,
-                            Name = settings.name,
-                            Details = settings.details,
-                            DetailsURL = settings.detailsURL,
-                            State = settings.state,
-                            StateURL = settings.stateURL,
-                            PartySize = (int)settings.partySize,
-                            PartyMax = (int)settings.partyMax,
-                            Timestamps = settings.timestamps,
-                            CustomTimestamp = settings.customTimestamp,
-                            CustomTimestampEndEnabled = settings.customTimestampEndEnabled,
-                            CustomTimestampEnd = settings.customTimestampEnd,
-                            LargeKey = settings.largeKey,
-                            LargeText = settings.largeText,
-                            LargeURL = settings.largeURL,
-                            SmallKey = settings.smallKey,
-                            SmallText = settings.smallText,
-                            SmallURL = settings.smallURL,
-                            Button1Text = settings.button1Text,
-                            Button1URL = settings.button1URL,
-                            Button2Text = settings.button2Text,
-                            Button2URL = settings.button2URL,
-                        });
+                        savePath = Path.ChangeExtension(savePath, MultiSlotPresetExtension);
+                    }
+
+                    if (IsMultiSlotPresetFile(savePath))
+                    {
+                        SaveMultiSlotPreset(savePath);
+                    }
+                    else
+                    {
+                        var slot = GetSelectedSlot();
+                        if (slot == null)
+                            return;
+
+                        using (var file = File.Create(savePath))
+                            xs.Serialize(file, slot.ToPreset());
                     }
 
                     Analytics.TrackEvent("Saved a preset");
@@ -1400,13 +1026,17 @@ namespace CustomRPC
         /// </summary>
         private void OpenDiscordSite(object sender, EventArgs e)
         {
-            if (settings.id == "")
+            SaveEditorToSelectedSlot();
+            var slot = GetSelectedSlot();
+            string id = slot?.ApplicationId ?? "";
+
+            if (id == "")
             {
                 MessageBox.Show(Strings.errorNoID, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1);
                 return;
             }
 
-            Utils.OpenInBrowser("https://discord.com/developers/applications/" + settings.id + "/rich-presence/assets");
+            Utils.OpenInBrowser("https://discord.com/developers/applications/" + id + "/rich-presence/assets");
         }
 
         /// <summary>
@@ -1414,8 +1044,8 @@ namespace CustomRPC
         /// </summary>
         private void Quit(object sender, EventArgs e)
         {
-            if (client != null)
-                client.Dispose();
+            SaveSlotsToStorage();
+            slotService?.Dispose();
 
             if (Utils.SaveSettings())
                 Application.Exit();
@@ -1475,7 +1105,7 @@ namespace CustomRPC
 
             settings.language = (string)lang.Tag;
             settings.changedLanguage = true;
-            settings.wasConnected = buttonDisconnect.Enabled;
+            settings.wasConnected = slotService?.Slots.Any(s => s.IsConnected) == true;
             Utils.SaveSettings();
             Program.AppMutex.Close();
             Application.Restart();
@@ -1554,15 +1184,13 @@ namespace CustomRPC
         /// </remarks>
         private void OnlyNumbers(object sender, EventArgs e)
         {
-            if (toAvoidRecursion || textBoxID.Text == "")
+            if (toAvoidRecursion || textBoxID.ReadOnly)
                 return;
 
-            textBoxID.ReadOnly = true; // Not sure if I need it?
-            toAvoidRecursion = true; // Just so this handler doesn't get called again on...
+            toAvoidRecursion = true;
 
-            int sel = textBoxID.SelectionStart; // Current cursor position
+            int sel = textBoxID.SelectionStart;
             int changed = 0;
-
             string newline = "";
 
             foreach (var symbol in textBoxID.Text)
@@ -1575,12 +1203,11 @@ namespace CustomRPC
 
             if (changed > 0)
             {
-                textBoxID.Text = newline; // ...this line
-                textBoxID.SelectionStart = sel - changed;
+                textBoxID.Text = newline;
+                textBoxID.SelectionStart = Math.Max(0, sel - changed);
                 textBoxID.SelectionLength = 0;
             }
 
-            textBoxID.ReadOnly = false;
             toAvoidRecursion = false;
         }
 
@@ -1596,17 +1223,14 @@ namespace CustomRPC
 
             if (!loading)
             {
-                settings.type = (int)type;
-                Utils.SaveSettings();
+                SaveEditorToSelectedSlot();
+                SaveSlotsToStorage();
             }
 
             bool canHaveParty = true, canHaveTimestamps = true;
 
             if (type != ActivityType.Playing)
                 canHaveParty = false;
-
-            if (type == ActivityType.Competing)
-                canHaveTimestamps = false;
 
             flowLayoutPanelParty.Enabled = canHaveParty;
             panelTimestamps.Enabled = canHaveTimestamps;
@@ -1626,8 +1250,8 @@ namespace CustomRPC
 
             if (!loading)
             {
-                settings.display = (int)display;
-                Utils.SaveSettings();
+                SaveEditorToSelectedSlot();
+                SaveSlotsToStorage();
             }
         }
 
@@ -1703,9 +1327,10 @@ namespace CustomRPC
             // settings.timestamps = btn.TabIndex; // I mean... it's a great container for int values
             // It was, until I needed to add a new type in the middle of the list
             settings.timestamps = (int)btn.Tag;
-            Utils.SaveSettings();
+            SaveEditorToSelectedSlot();
+            SaveSlotsToStorage();
 
-            tableLayoutPanelCustomTimestamps.Enabled = (TimestampType)settings.timestamps == TimestampType.Custom;
+            tableLayoutPanelCustomTimestamps.Enabled = (TimestampType)btn.Tag == TimestampType.Custom;
             dateTimePickerTimestampEnd.Enabled = checkBoxTimestampEnd.Checked;
         }
 
@@ -1724,10 +1349,14 @@ namespace CustomRPC
         /// </summary>
         private void FetchAssets(object sender, EventArgs e)
         {
-            if (settings.id == "" || (lastIDChecked == settings.id && nextAssetCheck.CompareTo(DateTime.Now) > 0))
+            SaveEditorToSelectedSlot();
+            var slot = GetSelectedSlot();
+            string appId = slot?.ApplicationId ?? "";
+
+            if (appId == "" || (lastIDChecked == appId && nextAssetCheck.CompareTo(DateTime.Now) > 0))
                 return;
 
-            lastIDChecked = settings.id;
+            lastIDChecked = appId;
 
             comboBoxLargeKey.Items.Clear();
             comboBoxSmallKey.Items.Clear();
@@ -1741,7 +1370,7 @@ namespace CustomRPC
                     ServicePointManager.Expect100Continue = true;
                     ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
 
-                    var res = client.GetAsync($"https://discord.com/api/oauth2/applications/{settings.id}/assets").Result;
+                    var res = client.GetAsync($"https://discord.com/api/oauth2/applications/{appId}/assets").Result;
 
                     if (res.IsSuccessStatusCode)
                     {
@@ -1771,6 +1400,21 @@ namespace CustomRPC
             Control ctrl = (Control)sender;
             if (ctrl.Enabled)
                 return;
+
+            if (ctrl is Button button)
+            {
+                using (var background = new SolidBrush(button.BackColor))
+                    e.Graphics.FillRectangle(background, button.ClientRectangle);
+
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    button.Text,
+                    button.Font,
+                    button.ClientRectangle,
+                    CurrentColors.TextInactive,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                return;
+            }
 
             var newClipRect = new Rectangle(e.ClipRectangle.Location, e.ClipRectangle.Size);
             if (sender is CheckBox)
@@ -1807,23 +1451,38 @@ namespace CustomRPC
         /// </summary>
         private void Connect()
         {
-            Utils.SaveSettings();
+            SaveEditorToSelectedSlot();
+            SaveSlotsToStorage();
 
-            if (Init()) // If successfully initialized...
+            var slot = GetSelectedSlot();
+            if (slot == null)
+                return;
+
+            if (!TryValidateSlotForConnect(slot, out string error))
             {
-                if (ConnectionManager.State == ConnectionState.Disconnected)
-                    Analytics.TrackEvent("Connected"); // Only send analytics if connect function was called from disconnected state
-
-                ConnectionManager.State = ConnectionState.Connecting;
-
-                timestampConnected = DateTime.UtcNow;
-
-                buttonConnect.Enabled = false; // ...disable Connect button...
-                buttonDisconnect.Enabled = true; // ...enable Disconnect button...
-                trayMenuDisconnect.Enabled = true; // ...enable Disconnect button in tray menu...
-                textBoxID.ReadOnly = true; // ...make the ID field read only...
-                toolStripStatusLabelStatus.Text = Strings.statusConnecting; // and update the connection status label
+                ShowSlotConstraintMessage(error);
+                return;
             }
+
+            if (!IsMultiSlotRpcMode())
+            {
+                foreach (var other in slotService.Slots)
+                {
+                    if (other.SlotId == slot.SlotId)
+                        continue;
+
+                    if (other.IsConnected ||
+                        other.ConnectionState == SlotConnectionState.Connecting ||
+                        other.ConnectionState == SlotConnectionState.UpdatingPresence)
+                        slotService.DisconnectSlot(other);
+                }
+            }
+
+            if (ConnectionManager.State == ConnectionState.Disconnected)
+                Analytics.TrackEvent("Connected");
+
+            slotService.ConnectSlot(slot);
+            UpdateGlobalConnectionUi();
         }
 
         /// <summary>
@@ -1836,23 +1495,12 @@ namespace CustomRPC
         /// </summary>
         private void Disconnect()
         {
-            buttonConnect.Enabled = true;
-            buttonDisconnect.Enabled = false;
-            trayMenuDisconnect.Enabled = false;
-            buttonUpdatePresence.Enabled = false;
-            textBoxID.ReadOnly = false;
-            toolStripStatusLabelUsername.Text = "";
-            toolStripStatusLabelStatus.Text = Strings.statusDisconnected;
-            trayIcon.Text = $"{res.GetString("trayIcon.Text")}{(Program.IsSecondInstance ? " (2)" : "")}";
+            var slot = GetSelectedSlot();
+            if (slot != null)
+                DisconnectSlot(slot);
 
-            textBoxID.BackColor = CurrentColors.BgTextFields;
-            ConnectionManager.State = ConnectionState.Disconnected;
-
-            restartTimer.Stop();
             localTimeTimer.Stop();
-
-            client.Dispose();
-
+            UpdateGlobalConnectionUi();
             Analytics.TrackEvent("Disconnected");
         }
 
@@ -1861,21 +1509,14 @@ namespace CustomRPC
         /// </summary>
         private void Reconnect()
         {
-            // Quick disconnect
-            restartTimer.Stop();
-            localTimeTimer.Stop();
-            client.Dispose();
-            textBoxID.BackColor = CurrentColors.BgTextFields;
+            var slot = GetSelectedSlot();
+            if (slot == null)
+                return;
 
-            // Quick connect
-            Utils.SaveSettings();
-            if (Init())
-            {
-                ConnectionManager.State = ConnectionState.Connecting;
-                toolStripStatusLabelStatus.Text = Strings.statusConnecting;
-            }
-            else
-                Disconnect(); // In case something goes wrong, disconnect fully.
+            SaveEditorToSelectedSlot();
+            SaveSlotsToStorage();
+            slotService.ReconnectSlot(slot);
+            UpdateGlobalConnectionUi();
         }
 
         /// <summary>
@@ -1883,7 +1524,7 @@ namespace CustomRPC
         /// </summary>
         private void Update(object sender, EventArgs e)
         {
-            Utils.SaveSettings();
+            SaveSlotsToStorage();
             SetPresence();
         }
     }

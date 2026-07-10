@@ -1,4 +1,4 @@
-﻿namespace CustomRPC
+namespace CustomRPC
 {
     partial class MainForm
     {
@@ -18,7 +18,8 @@
                 components.Dispose();
             }
 
-            if (disposing && (client != null)) client.Dispose();
+            if (disposing && (slotService != null))
+                slotService.Dispose();
 
             base.Dispose(disposing);
         }
@@ -549,8 +550,8 @@
             // 
             // toolTipInfo
             // 
-            this.toolTipInfo.ToolTipIcon = System.Windows.Forms.ToolTipIcon.Info;
-            this.toolTipInfo.ToolTipTitle = "Information";
+            this.toolTipInfo.ToolTipIcon = System.Windows.Forms.ToolTipIcon.None;
+            this.toolTipInfo.ToolTipTitle = "";
             // 
             // radioButtonLastConnection
             // 
@@ -1101,11 +1102,9 @@
             // textBoxID
             // 
             this.textBoxID.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(65)))), ((int)(((byte)(68)))), ((int)(((byte)(75)))));
-            this.textBoxID.DataBindings.Add(new System.Windows.Forms.Binding("Text", global::CustomRPC.Properties.Settings.Default, "id", true, System.Windows.Forms.DataSourceUpdateMode.OnPropertyChanged));
             this.textBoxID.ForeColor = System.Drawing.Color.White;
             resources.ApplyResources(this.textBoxID, "textBoxID");
             this.textBoxID.Name = "textBoxID";
-            this.textBoxID.Text = global::CustomRPC.Properties.Settings.Default.id;
             this.textBoxID.TextChanged += new System.EventHandler(this.OnlyNumbers);
             // 
             // MainForm
