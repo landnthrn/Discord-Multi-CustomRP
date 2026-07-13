@@ -118,7 +118,11 @@
     <Compile Include="MainForm.Layout.cs">
       <DependentUpon>MainForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="MainForm.AlternatingPresets.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="ActivitiesUiText.cs" />
+    <Compile Include="QuietMessageBox.cs" />
     <Compile Include="ActivitiesInfoContent.cs" />
     <Compile Include="TooltipLine.cs" />
     <Compile Include="TooltipPainter.cs" />
