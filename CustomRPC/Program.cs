@@ -1,4 +1,4 @@
-﻿using Microsoft.AppCenter;
+using Microsoft.AppCenter;
 using Microsoft.AppCenter.Analytics;
 using Microsoft.AppCenter.Crashes;
 using System;
@@ -60,13 +60,13 @@ namespace CustomRPC
                 helpText.AppendLine("-?, --help: shows this help text");
                 helpText.AppendLine();
                 helpText.AppendLine("Option(s) and file path(s) can be included in any order. Including more than one file path will result in the last valid one being used.");
-                MessageBox.Show(helpText.ToString(), Application.ProductName);
+                QuietMessageBox.Show(helpText.ToString(), Application.ProductName);
                 return;
             }
 
             if (args.Length > 0 && args[0] == "uninstall")
             {
-                if (MessageBox.Show(Strings.deleteSettings, Application.ProductName, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes)
+                if (QuietMessageBox.Show(Strings.deleteSettings, Application.ProductName, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes)
                 {
                     string settingsPath = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.PerUserRoamingAndLocal).FilePath;
                     settingsPath = Path.GetFullPath(Path.Combine(settingsPath, @"..\.."));
@@ -112,7 +112,7 @@ namespace CustomRPC
                     }
                     catch
                     {
-                        MessageBox.Show(Strings.errorInvalidPresetFile, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        QuietMessageBox.Show(Strings.errorInvalidPresetFile, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
 
@@ -130,7 +130,7 @@ namespace CustomRPC
             }
             catch (ConfigurationErrorsException e)
             {
-                var result = MessageBox.Show(Strings.errorCorruptSettings, Strings.error, MessageBoxButtons.YesNo, MessageBoxIcon.Error);
+                var result = QuietMessageBox.Show(Strings.errorCorruptSettings, Strings.error, MessageBoxButtons.YesNo, MessageBoxIcon.Error);
 
                 if (result == DialogResult.Yes)
                 {
@@ -155,7 +155,7 @@ namespace CustomRPC
             {
                 if (!settings.analyticsAskedConsent) // First time launching the app since the analytics integration
                 {
-                    var result = MessageBox.Show(Strings.askAnalyticsConsent, Strings.information, MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                    var result = QuietMessageBox.Show(Strings.askAnalyticsConsent, Strings.information, MessageBoxButtons.YesNo, MessageBoxIcon.Information);
 
                     var allowAnalytics = result == DialogResult.Yes;
 
@@ -252,7 +252,7 @@ namespace CustomRPC
 
                 if (ex_inner is FileNotFoundException && ex_inner.Message.Contains("Version=") || ex_inner is FileLoadException || ex_inner is BadImageFormatException)
                 {
-                    var result = MessageBox.Show($"{ex_inner.Message}\r\n\r\n{string.Format(Strings.errorLoadingAssembly, Application.StartupPath)}", Strings.error, MessageBoxButtons.RetryCancel, MessageBoxIcon.Error);
+                    var result = QuietMessageBox.Show($"{ex_inner.Message}\r\n\r\n{string.Format(Strings.errorLoadingAssembly, Application.StartupPath)}", Strings.error, MessageBoxButtons.RetryCancel, MessageBoxIcon.Error);
 
                     if (result == DialogResult.Retry)
                     {
@@ -262,7 +262,7 @@ namespace CustomRPC
                 }
                 else
                 {
-                    MessageBox.Show(ex.ToString(), "CustomRP - " + Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    QuietMessageBox.Show(ex.ToString(), "CustomRP - " + Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
                     throw;
                 }
             }
