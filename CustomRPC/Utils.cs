@@ -1,8 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace CustomRPC
 {
@@ -19,6 +21,12 @@ namespace CustomRPC
 
         [DllImport("user32")]
         public static extern bool PostMessage(IntPtr hwnd, int msg, IntPtr wparam, IntPtr lparam);
+
+        [DllImport("shell32.dll")]
+        public static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+
+        public const uint SHCNE_ASSOCCHANGED = 0x08000000;
+        public const uint SHCNF_IDLIST = 0x0000;
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
@@ -44,19 +52,59 @@ namespace CustomRPC
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
         private static extern int SetWindowTheme(IntPtr hwnd, string pszSubAppName, string pszSubIdList);
 
-        public static void ApplyListViewDarkScrollbars(Control listView)
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ShowScrollBar(IntPtr hWnd, int wBar, [MarshalAs(UnmanagedType.Bool)] bool bShow);
+
+        const int SB_VERT = 1;
+
+        public static void ApplyListViewThemeScrollbars(Control listView)
         {
-            if (listView == null || !Properties.Settings.Default.darkMode)
+            if (listView == null)
                 return;
 
             void Apply(object sender, EventArgs e)
             {
-                if (listView.IsHandleCreated)
-                    SetWindowTheme(listView.Handle, "DarkMode_Explorer", null);
+                if (!listView.IsHandleCreated)
+                    return;
+
+                // DarkMode_Explorer for dark; Explorer restores normal light scrollbars.
+                SetWindowTheme(
+                    listView.Handle,
+                    Properties.Settings.Default.darkMode ? "DarkMode_Explorer" : "Explorer",
+                    null);
             }
 
             Apply(null, EventArgs.Empty);
+            listView.HandleCreated -= Apply;
             listView.HandleCreated += Apply;
+        }
+
+        /// <summary>Legacy name — redirects to theme-aware scrollbar styling.</summary>
+        public static void ApplyListViewDarkScrollbars(Control listView) =>
+            ApplyListViewThemeScrollbars(listView);
+
+        /// <summary>
+        /// Force the vertical scrollbar visible while needed. When not forcing, nudge the control so ListView recalculates naturally.
+        /// </summary>
+        public static void SetListViewVerticalScrollbarForced(Control listView, bool forceVisible)
+        {
+            if (listView == null || !listView.IsHandleCreated)
+                return;
+
+            if (forceVisible)
+            {
+                ShowScrollBar(listView.Handle, SB_VERT, true);
+                return;
+            }
+
+            // Don't ShowScrollBar(false) — that can hide a legitimately needed bar. Nudge size to recalc.
+            var size = listView.Size;
+            if (size.Height > 1)
+            {
+                listView.Size = new Size(size.Width, size.Height - 1);
+                listView.Size = size;
+            }
         }
 
         private static bool IsWindows10OrGreater(int build = -1)
@@ -1200,6 +1248,47 @@ namespace CustomRPC
         }
 
         /// <summary>
+        /// Registers .cmrp with the same preset icon / open command as .crp (HKCU).
+        /// Safe for portable runs; no-ops on failure.
+        /// </summary>
+        public static void EnsureCmrpFileAssociation()
+        {
+            try
+            {
+                string exePath = Application.ExecutablePath;
+                const string progId = "CustomRP.cmrp";
+
+                using (var extKey = Registry.CurrentUser.CreateSubKey(@"Software\Classes\.cmrp"))
+                {
+                    if (extKey == null)
+                        return;
+                    extKey.SetValue("", progId);
+                    using (var openWith = extKey.CreateSubKey("OpenWithProgids"))
+                        openWith?.SetValue(progId, "");
+                }
+
+                using (var progKey = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + progId))
+                {
+                    if (progKey == null)
+                        return;
+                    progKey.SetValue("", "CustomRP Multi-RP Preset");
+                    using (var iconKey = progKey.CreateSubKey("DefaultIcon"))
+                        iconKey?.SetValue("", "\"" + exePath + "\",1");
+                    using (var cmdKey = progKey.CreateSubKey(@"shell\open\command"))
+                        cmdKey?.SetValue("", "\"" + exePath + "\" \"%1\"");
+                }
+
+                using (var appTypes = Registry.CurrentUser.CreateSubKey(@"Software\Classes\Applications\CustomRP.exe\SupportedTypes"))
+                    appTypes?.SetValue(".cmrp", "");
+
+                WinApi.SHChangeNotify(WinApi.SHCNE_ASSOCCHANGED, WinApi.SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
+            }
+            catch
+            {
+            }
+        }
+
+        /// <summary>
         /// A try-catch wrapper function for saving app settings.
         /// </summary>
         /// <returns><see langword="True"/> if settings were saved properly, <see langword="false"/> otherwise.</returns>
@@ -1212,7 +1301,7 @@ namespace CustomRPC
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"{Strings.errorSavingSettings} {ex.Message}", Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                QuietMessageBox.Show($"{Strings.errorSavingSettings} {ex.Message}", Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
         }
@@ -1246,7 +1335,7 @@ namespace CustomRPC
                 return;
 
             Clipboard.SetText(url);
-            MessageBox.Show(MainForm.ActiveForm, Strings.errorOpeningURL, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            QuietMessageBox.Show(MainForm.ActiveForm, Strings.errorOpeningURL, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
 
         /// <summary>
