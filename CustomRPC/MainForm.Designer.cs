@@ -47,6 +47,7 @@ namespace CustomRPC
             this.newPresetToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.loadPresetToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.savePresetToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.saveChangesToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripSeparatorFile1 = new System.Windows.Forms.ToolStripSeparator();
             this.uploadAssetsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripSeparatorFile2 = new System.Windows.Forms.ToolStripSeparator();
@@ -195,13 +196,13 @@ namespace CustomRPC
             // 
             this.trayMenuReconnect.Name = "trayMenuReconnect";
             resources.ApplyResources(this.trayMenuReconnect, "trayMenuReconnect");
-            this.trayMenuReconnect.Click += new System.EventHandler(this.Connect);
+            this.trayMenuReconnect.Click += new System.EventHandler(this.TrayMenuReconnect_Click);
             // 
             // trayMenuDisconnect
             // 
             resources.ApplyResources(this.trayMenuDisconnect, "trayMenuDisconnect");
             this.trayMenuDisconnect.Name = "trayMenuDisconnect";
-            this.trayMenuDisconnect.Click += new System.EventHandler(this.Disconnect);
+            this.trayMenuDisconnect.Click += new System.EventHandler(this.TrayMenuDisconnect_Click);
             // 
             // toolStripSeparator3
             // 
@@ -231,6 +232,7 @@ namespace CustomRPC
             this.newPresetToolStripMenuItem,
             this.loadPresetToolStripMenuItem,
             this.savePresetToolStripMenuItem,
+            this.saveChangesToolStripMenuItem,
             this.toolStripSeparatorFile1,
             this.uploadAssetsToolStripMenuItem,
             this.toolStripSeparatorFile2,
@@ -255,6 +257,12 @@ namespace CustomRPC
             this.savePresetToolStripMenuItem.Name = "savePresetToolStripMenuItem";
             resources.ApplyResources(this.savePresetToolStripMenuItem, "savePresetToolStripMenuItem");
             this.savePresetToolStripMenuItem.Click += new System.EventHandler(this.SavePreset);
+            // 
+            // saveChangesToolStripMenuItem
+            // 
+            this.saveChangesToolStripMenuItem.Name = "saveChangesToolStripMenuItem";
+            this.saveChangesToolStripMenuItem.Text = "Save Changes";
+            this.saveChangesToolStripMenuItem.Click += new System.EventHandler(this.SaveChanges);
             // 
             // toolStripSeparatorFile1
             // 
@@ -488,63 +496,63 @@ namespace CustomRPC
             // labelID
             // 
             resources.ApplyResources(this.labelID, "labelID");
-            this.labelID.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelID.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelID.Name = "labelID";
             this.toolTipInfo.SetToolTip(this.labelID, resources.GetString("labelID.ToolTip"));
             // 
             // labelDetails
             // 
             resources.ApplyResources(this.labelDetails, "labelDetails");
-            this.labelDetails.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelDetails.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelDetails.Name = "labelDetails";
             this.toolTipInfo.SetToolTip(this.labelDetails, resources.GetString("labelDetails.ToolTip"));
             // 
             // labelState
             // 
             resources.ApplyResources(this.labelState, "labelState");
-            this.labelState.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelState.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelState.Name = "labelState";
             this.toolTipInfo.SetToolTip(this.labelState, resources.GetString("labelState.ToolTip"));
             // 
             // labelSmallKey
             // 
             resources.ApplyResources(this.labelSmallKey, "labelSmallKey");
-            this.labelSmallKey.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelSmallKey.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelSmallKey.Name = "labelSmallKey";
             this.toolTipInfo.SetToolTip(this.labelSmallKey, resources.GetString("labelSmallKey.ToolTip"));
             // 
             // labelSmallText
             // 
             resources.ApplyResources(this.labelSmallText, "labelSmallText");
-            this.labelSmallText.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelSmallText.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelSmallText.Name = "labelSmallText";
             this.toolTipInfo.SetToolTip(this.labelSmallText, resources.GetString("labelSmallText.ToolTip"));
             // 
             // labelLargeText
             // 
             resources.ApplyResources(this.labelLargeText, "labelLargeText");
-            this.labelLargeText.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelLargeText.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelLargeText.Name = "labelLargeText";
             this.toolTipInfo.SetToolTip(this.labelLargeText, resources.GetString("labelLargeText.ToolTip"));
             // 
             // labelLargeKey
             // 
             resources.ApplyResources(this.labelLargeKey, "labelLargeKey");
-            this.labelLargeKey.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelLargeKey.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelLargeKey.Name = "labelLargeKey";
             this.toolTipInfo.SetToolTip(this.labelLargeKey, resources.GetString("labelLargeKey.ToolTip"));
             // 
             // labelSmall
             // 
             resources.ApplyResources(this.labelSmall, "labelSmall");
-            this.labelSmall.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelSmall.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelSmall.Name = "labelSmall";
             this.toolTipInfo.SetToolTip(this.labelSmall, resources.GetString("labelSmall.ToolTip"));
             // 
             // labelLarge
             // 
             resources.ApplyResources(this.labelLarge, "labelLarge");
-            this.labelLarge.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelLarge.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelLarge.Name = "labelLarge";
             this.toolTipInfo.SetToolTip(this.labelLarge, resources.GetString("labelLarge.ToolTip"));
             // 
@@ -589,14 +597,14 @@ namespace CustomRPC
             // labelTimestamp
             // 
             resources.ApplyResources(this.labelTimestamp, "labelTimestamp");
-            this.labelTimestamp.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelTimestamp.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelTimestamp.Name = "labelTimestamp";
             this.toolTipInfo.SetToolTip(this.labelTimestamp, resources.GetString("labelTimestamp.ToolTip"));
             // 
             // labelParty
             // 
             resources.ApplyResources(this.labelParty, "labelParty");
-            this.labelParty.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelParty.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelParty.Name = "labelParty";
             this.toolTipInfo.SetToolTip(this.labelParty, resources.GetString("labelParty.ToolTip"));
             // 
@@ -614,42 +622,42 @@ namespace CustomRPC
             // labelButton1
             // 
             resources.ApplyResources(this.labelButton1, "labelButton1");
-            this.labelButton1.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelButton1.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelButton1.Name = "labelButton1";
             this.toolTipInfo.SetToolTip(this.labelButton1, resources.GetString("labelButton1.ToolTip"));
             // 
             // labelButton2
             // 
             resources.ApplyResources(this.labelButton2, "labelButton2");
-            this.labelButton2.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelButton2.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelButton2.Name = "labelButton2";
             this.toolTipInfo.SetToolTip(this.labelButton2, resources.GetString("labelButton2.ToolTip"));
             // 
             // labelButton1URL
             // 
             resources.ApplyResources(this.labelButton1URL, "labelButton1URL");
-            this.labelButton1URL.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelButton1URL.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelButton1URL.Name = "labelButton1URL";
             this.toolTipInfo.SetToolTip(this.labelButton1URL, resources.GetString("labelButton1URL.ToolTip"));
             // 
             // labelButton2URL
             // 
             resources.ApplyResources(this.labelButton2URL, "labelButton2URL");
-            this.labelButton2URL.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelButton2URL.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelButton2URL.Name = "labelButton2URL";
             this.toolTipInfo.SetToolTip(this.labelButton2URL, resources.GetString("labelButton2URL.ToolTip"));
             // 
             // labelButton1Text
             // 
             resources.ApplyResources(this.labelButton1Text, "labelButton1Text");
-            this.labelButton1Text.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelButton1Text.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelButton1Text.Name = "labelButton1Text";
             this.toolTipInfo.SetToolTip(this.labelButton1Text, resources.GetString("labelButton1Text.ToolTip"));
             // 
             // labelButton2Text
             // 
             resources.ApplyResources(this.labelButton2Text, "labelButton2Text");
-            this.labelButton2Text.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelButton2Text.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelButton2Text.Name = "labelButton2Text";
             this.toolTipInfo.SetToolTip(this.labelButton2Text, resources.GetString("labelButton2Text.ToolTip"));
             // 
@@ -667,14 +675,14 @@ namespace CustomRPC
             // labelType
             // 
             resources.ApplyResources(this.labelType, "labelType");
-            this.labelType.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelType.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelType.Name = "labelType";
             this.toolTipInfo.SetToolTip(this.labelType, resources.GetString("labelType.ToolTip"));
             // 
             // labelName
             // 
             resources.ApplyResources(this.labelName, "labelName");
-            this.labelName.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelName.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelName.Name = "labelName";
             this.toolTipInfo.SetToolTip(this.labelName, resources.GetString("labelName.ToolTip"));
             // 
@@ -720,35 +728,35 @@ namespace CustomRPC
             // labelDetailsURL
             // 
             resources.ApplyResources(this.labelDetailsURL, "labelDetailsURL");
-            this.labelDetailsURL.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelDetailsURL.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelDetailsURL.Name = "labelDetailsURL";
             this.toolTipInfo.SetToolTip(this.labelDetailsURL, resources.GetString("labelDetailsURL.ToolTip"));
             // 
             // labelStateURL
             // 
             resources.ApplyResources(this.labelStateURL, "labelStateURL");
-            this.labelStateURL.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelStateURL.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelStateURL.Name = "labelStateURL";
             this.toolTipInfo.SetToolTip(this.labelStateURL, resources.GetString("labelStateURL.ToolTip"));
             // 
             // labelDisplay
             // 
             resources.ApplyResources(this.labelDisplay, "labelDisplay");
-            this.labelDisplay.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelDisplay.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelDisplay.Name = "labelDisplay";
             this.toolTipInfo.SetToolTip(this.labelDisplay, resources.GetString("labelDisplay.ToolTip"));
             // 
             // labelSmallURL
             // 
             resources.ApplyResources(this.labelSmallURL, "labelSmallURL");
-            this.labelSmallURL.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelSmallURL.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelSmallURL.Name = "labelSmallURL";
             this.toolTipInfo.SetToolTip(this.labelSmallURL, resources.GetString("labelSmallURL.ToolTip"));
             // 
             // labelLargeURL
             // 
             resources.ApplyResources(this.labelLargeURL, "labelLargeURL");
-            this.labelLargeURL.Cursor = System.Windows.Forms.Cursors.Help;
+            this.labelLargeURL.Cursor = System.Windows.Forms.Cursors.Default;
             this.labelLargeURL.Name = "labelLargeURL";
             this.toolTipInfo.SetToolTip(this.labelLargeURL, resources.GetString("labelLargeURL.ToolTip"));
             // 
@@ -1243,6 +1251,7 @@ namespace CustomRPC
         private System.Windows.Forms.ToolStripMenuItem translatorsToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem loadPresetToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem savePresetToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem saveChangesToolStripMenuItem;
         private System.Windows.Forms.ToolStripSeparator toolStripSeparatorFile2;
         private System.Windows.Forms.Label labelParty;
         private System.Windows.Forms.Label labelPartyOf;

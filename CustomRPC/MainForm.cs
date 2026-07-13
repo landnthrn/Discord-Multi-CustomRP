@@ -56,6 +56,9 @@ namespace CustomRPC
         public string Button1URL;
         public string Button2Text;
         public string Button2URL;
+        public bool Enabled;
+        [XmlIgnore]
+        public bool EnabledSpecified;
     }
 
     /// <summary>
@@ -113,11 +116,23 @@ namespace CustomRPC
     public partial class MainForm : Form
     {
         const string MultiSlotPresetExtension = ".cmrp";
-        const string LegacyMultiSlotPresetExtension = ".mrp";
+        const string LoadPresetFilter =
+            "Multi-RP Preset (*.cmrp)|*.cmrp|Uni-RP Preset (*.crp)|*.crp|Both (*.cmrp) (*.crp)|*.cmrp;*.crp";
+        const string SavePresetFilter =
+            "Multi-RP Preset (*.cmrp)|*.cmrp|Uni-RP Preset (*.crp)|*.crp";
 
         static bool IsMultiSlotPresetFile(string path) =>
-            path.EndsWith(MultiSlotPresetExtension, StringComparison.OrdinalIgnoreCase) ||
-            path.EndsWith(LegacyMultiSlotPresetExtension, StringComparison.OrdinalIgnoreCase);
+            !string.IsNullOrEmpty(path) &&
+            path.EndsWith(MultiSlotPresetExtension, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Last preset file opened via Load / double-click / drag-drop (not alternating).
+        /// Save Changes writes only to this path.
+        /// </summary>
+        string loadedPresetPath;
+
+        ToolStripLabel toolStripLabelActivePresetPrefix;
+        ToolStripLabel toolStripLabelActivePresetName;
 
         /// <summary>
         /// Prevents some event handlers from executing while the app is loading.
@@ -233,6 +248,9 @@ namespace CustomRPC
             // Setting up dark/light mode
             ThemeSetup();
 
+            // Associate .cmrp with the same preset icon as .crp (portable + already-installed)
+            Utils.EnsureCmrpFileAssociation();
+
             // Setting up startup link for current user (enabled by default)
 #if !DEBUG
             StartupSetup();
@@ -249,7 +267,21 @@ namespace CustomRPC
             runOnStartupToolStripMenuItem.Checked = settings.runOnStartup;
             startMinimizedToolStripMenuItem.Checked = settings.startMinimized;
             autoconnectToolStripMenuItem.Checked = settings.autoconnect;
-            checkUpdatesToolStripMenuItem.Checked = settings.checkUpdates;
+            // Hide Check for Updates so this fork does not pull CustomRP releases.
+            settings.checkUpdates = false;
+            Utils.SaveSettings();
+            checkUpdatesToolStripMenuItem.Visible = false;
+            checkUpdatesToolStripMenuItem.Enabled = false;
+            if (checkForUpdatesToolStripMenuItem != null)
+            {
+                checkForUpdatesToolStripMenuItem.Visible = false;
+                checkForUpdatesToolStripMenuItem.Enabled = false;
+            }
+            if (downloadUpdateToolStripMenuItem != null)
+            {
+                downloadUpdateToolStripMenuItem.Visible = false;
+                downloadUpdateToolStripMenuItem.Enabled = false;
+            }
             allowAnalyticsToolStripMenuItem.Checked = Analytics.IsEnabledAsync().Result;
             darkModeToolStripMenuItem.Checked = settings.darkMode;
 
@@ -339,6 +371,8 @@ namespace CustomRPC
             if (trayMenuDisconnect.Text == res.GetString("trayMenuDisconnect.Text", CultureInfo.GetCultureInfo("en")))
                 trayMenuDisconnect.Text = res.GetString("buttonDisconnect.Text");
 
+            SyncTrayMenuForRpcMode();
+
             // Localize the statusbar text in case the autoconnect is disabled
             toolStripStatusLabelStatus.Text = Strings.statusDisconnected;
 
@@ -371,15 +405,19 @@ namespace CustomRPC
             newPresetToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.N;
             loadPresetToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.O;
             savePresetToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.S;
+            saveChangesToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.Shift | Keys.S;
             uploadAssetsToolStripMenuItem.ShortcutKeys = Keys.Control | Keys.U;
             openTheManualToolStripMenuItem.ShortcutKeys = Keys.F1;
 
             loading = false;
 
             InitializeSlotSystem();
+            SetupActivePresetMenuLabels();
+            UpdateSaveChangesMenuItem();
+            UpdateActivePresetMenuLabels();
 
             if (!string.IsNullOrEmpty(startupPresetPath))
-                LoadPreset(startupPresetPath);
+                LoadPreset(startupPresetPath, addAsNewSlot: true, confirmMultiSlotReplace: true);
 
             // Starts minimized to tray by default, unless you just changed language
             if (settings.changedLanguage || !settings.startMinimized)
@@ -395,7 +433,7 @@ namespace CustomRPC
             if (settings.firstStart)
             {
                 // Asking if the user wants the manual
-                var messageBox = MessageBox.Show(this, Strings.firstTimeRunText, Strings.firstTimeRun, MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button1);
+                var messageBox = QuietMessageBox.Show(this, Strings.firstTimeRunText, Strings.firstTimeRun, MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button1);
 
                 if (messageBox == DialogResult.Yes)
                     // Opens the setup manual
@@ -410,8 +448,9 @@ namespace CustomRPC
 
             CheckIfCrashed();
 
-            if (settings.checkUpdates)
-                CheckForUpdates();
+            // Update checks disabled for this fork (menu items hidden).
+            // if (settings.checkUpdates)
+            //     CheckForUpdates();
 
             settings.changedLanguage = false;
         }
@@ -427,7 +466,7 @@ namespace CustomRPC
             }
             else if (message.Msg == Program.WM_IMPORTPRESET)
             {
-                LoadPreset(File.ReadAllText(Program.IPCPath));
+                LoadPreset(File.ReadAllText(Program.IPCPath), addAsNewSlot: true, confirmMultiSlotReplace: true);
             }
             else if (message.Msg == 0x0016) // WM_ENDSESSION
             {
@@ -498,15 +537,16 @@ namespace CustomRPC
             if (settings.darkMode)
             {
                 ToolStripManager.Renderer = new DarkModeRenderer();
-                buttonConnect.FlatStyle = buttonDisconnect.FlatStyle = buttonUpdatePresence.FlatStyle = FlatStyle.Flat;
             }
             else
             {
                 ToolStripManager.Renderer = new LightModeRenderer();
-                buttonConnect.FlatStyle = buttonDisconnect.FlatStyle = buttonUpdatePresence.FlatStyle = FlatStyle.Standard;
             }
 
             ApplyActivitiesPanelTheme();
+            ApplyAlternatingPresetsTheme();
+            UpdateCyclingEditLock();
+            UpdateActivePresetMenuLabels();
         }
 
         void ClearActionButtonFocus(object sender, EventArgs e)
@@ -554,7 +594,7 @@ namespace CustomRPC
             {
                 // If there's no internet or Github is down, do nothing, unless it's a user requested update check
                 if (manual)
-                    MessageBox.Show(this, Strings.errorNoInternet, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    QuietMessageBox.Show(this, Strings.errorNoInternet, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -617,7 +657,7 @@ namespace CustomRPC
                     downloadUpdateToolStripMenuItem.Visible = false; // If user doesn't want update notifications, let's not bother them
             }
             else if (manual) // If there's no update available and it was a user initiated update check, notify them about it
-                MessageBox.Show(this, Strings.noUpdatesFound, Strings.information, MessageBoxButtons.OK, MessageBoxIcon.Information, MessageBoxDefaultButton.Button1);
+                QuietMessageBox.Show(this, Strings.noUpdatesFound, Strings.information, MessageBoxButtons.OK, MessageBoxIcon.Information, MessageBoxDefaultButton.Button1);
         }
 
         /// <summary>
@@ -662,7 +702,7 @@ namespace CustomRPC
                     {
                     }
 
-                    var result = MessageBox.Show(this, Strings.errorUpdateFailed, Strings.error, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1);
+                    var result = QuietMessageBox.Show(this, Strings.errorUpdateFailed, Strings.error, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1);
 
                     if (result == DialogResult.Yes)
                         continue;
@@ -724,7 +764,7 @@ namespace CustomRPC
                 // I *think* this would only happen if an antivirus would intervene saving/deleting a file in a user folder,
                 // therefore I'm just allowing the user to quickly try changing the option again
                 runOnStartupToolStripMenuItem.Checked = !settings.runOnStartup;
-                MessageBox.Show($"{Strings.errorStartupShortcut} {e.Message}", Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                QuietMessageBox.Show($"{Strings.errorStartupShortcut} {e.Message}", Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -752,7 +792,7 @@ namespace CustomRPC
 
             if (multiSlotPresetFiles.Length > 0)
             {
-                LoadMultiSlotPresetFile(multiSlotPresetFiles[0]);
+                LoadMultiSlotPresetFile(multiSlotPresetFiles[0], confirmReplace: true);
                 return;
             }
 
@@ -764,7 +804,7 @@ namespace CustomRPC
             }
 
             if (crpFiles.Length == 1)
-                LoadPreset(crpFiles[0]);
+                LoadPreset(crpFiles[0], addAsNewSlot: true);
         }
 
         /// <summary>
@@ -840,9 +880,13 @@ namespace CustomRPC
         /// <param name="e"></param>
         private void NewPreset(object sender, EventArgs e)
         {
-            if (MessageBox.Show(this, Strings.newPresetConfirmation, Application.ProductName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
+            if (IsCyclingEditLocked())
                 return;
 
+            if (QuietMessageBox.Show(this, Strings.newPresetConfirmation, Application.ProductName, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+
+            ClearLoadedPresetPath();
             ApplyNewPreset();
         }
 
@@ -857,11 +901,18 @@ namespace CustomRPC
                 var xs = new XmlSerializer(typeof(Preset));
                 var preset = (Preset)xs.Deserialize(file);
 
+                if (addAsNewSlot)
+                {
+                    ImportPresetAsSlot(preset, addAsNewSlot: true);
+                    Analytics.TrackEvent("Loaded a preset");
+                    return;
+                }
+
                 var slot = GetSelectedSlot();
                 bool wasConnected = slot?.IsConnected == true;
                 bool isNewID = slot != null && slot.ApplicationId != preset.ID;
 
-                ImportPresetAsSlot(preset, addAsNewSlot);
+                ImportPresetAsSlot(preset, addAsNewSlot: false);
 
                 Analytics.TrackEvent("Loaded a preset");
 
@@ -879,7 +930,7 @@ namespace CustomRPC
             }
             catch
             {
-                MessageBox.Show(Strings.errorInvalidPresetFile, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                QuietMessageBox.Show(Strings.errorInvalidPresetFile, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -892,9 +943,14 @@ namespace CustomRPC
         /// </summary>
         private void LoadPreset(object sender, EventArgs e)
         {
+            if (IsCyclingEditLocked())
+                return;
+
             var presetFile = new OpenFileDialog()
             {
-                Filter = "Multi Activity Preset|*.cmrp|CustomRP Preset|*.crp|All supported|*.cmrp;*.crp;*.mrp",
+                Filter = LoadPresetFilter,
+                FilterIndex = 3,
+                DefaultExt = "cmrp",
                 Multiselect = true,
             };
 
@@ -906,19 +962,46 @@ namespace CustomRPC
                 if (presetFile.FileNames.Length > 1)
                 {
                     foreach (var file in presetFile.FileNames)
-                        LoadPreset(file, addAsNewSlot: true);
+                    {
+                        if (IsMultiSlotPresetFile(file))
+                            LoadMultiSlotPresetFile(file, confirmReplace: true);
+                        else
+                            LoadPreset(file, addAsNewSlot: true);
+                    }
                     return;
                 }
 
                 var filePath = presetFile.FileName;
                 if (IsMultiSlotPresetFile(filePath))
-                    LoadMultiSlotPresetFile(filePath);
+                {
+                    LoadMultiSlotPresetFile(filePath, confirmReplace: true, rememberAsLoaded: true);
+                }
                 else
-                    LoadPreset(File.OpenRead(filePath));
+                {
+                    var choice = QuietMessageBox.Show(
+                        this,
+                        ActivitiesUiText.LoadCrpChooseMode,
+                        Application.ProductName,
+                        MessageBoxButtons.YesNoCancel,
+                        MessageBoxIcon.Question);
+
+                    if (choice == DialogResult.Cancel)
+                        return;
+
+                    if (choice == DialogResult.Yes)
+                    {
+                        LoadCrpPresetReplacingChart(filePath);
+                    }
+                    else
+                    {
+                        LoadPreset(File.OpenRead(filePath), addAsNewSlot: true);
+                        SetLoadedPresetPath(filePath);
+                    }
+                }
             }
             catch
             {
-                MessageBox.Show(Strings.errorInvalidPresetFile, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                QuietMessageBox.Show(Strings.errorInvalidPresetFile, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -926,36 +1009,76 @@ namespace CustomRPC
         /// Loads preset from a file.
         /// </summary>
         /// <param name="filePath">The path to the preset file.</param>
-        private void LoadPreset(string filePath, bool addAsNewSlot = false)
+        private void LoadPreset(string filePath, bool addAsNewSlot = false, bool confirmMultiSlotReplace = false)
         {
             try
             {
                 if (IsMultiSlotPresetFile(filePath))
-                    LoadMultiSlotPresetFile(filePath);
+                {
+                    LoadMultiSlotPresetFile(filePath, confirmReplace: confirmMultiSlotReplace, rememberAsLoaded: true);
+                }
                 else
+                {
                     LoadPreset(File.OpenRead(filePath), addAsNewSlot);
+                    SetLoadedPresetPath(filePath);
+                }
             }
             catch
             {
-                MessageBox.Show(Strings.errorInvalidPresetFile, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                QuietMessageBox.Show(Strings.errorInvalidPresetFile, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
-        void LoadMultiSlotPresetFile(string filePath)
+        void LoadMultiSlotPresetFile(string filePath, bool confirmReplace = false, bool rememberAsLoaded = true)
         {
             try
             {
+                if (confirmReplace)
+                {
+                    var confirm = QuietMessageBox.Show(
+                        this,
+                        ActivitiesUiText.LoadCmrpReplaceConfirm,
+                        Application.ProductName,
+                        MessageBoxButtons.YesNoCancel,
+                        MessageBoxIcon.Warning,
+                        MessageBoxDefaultButton.Button2);
+
+                    if (confirm != DialogResult.Yes)
+                        return;
+                }
+
                 var serializer = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue };
                 var preset = serializer.Deserialize<MultiSlotPreset>(File.ReadAllText(filePath));
                 if (preset?.Slots == null || preset.Slots.Length == 0)
                     throw new InvalidDataException();
 
                 LoadMultiSlotPreset(preset);
+                if (rememberAsLoaded)
+                    SetLoadedPresetPath(filePath);
                 Analytics.TrackEvent("Loaded a multi-slot preset");
             }
             catch
             {
-                MessageBox.Show(Strings.errorInvalidPresetFile, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                QuietMessageBox.Show(Strings.errorInvalidPresetFile, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        void LoadCrpPresetReplacingChart(string filePath)
+        {
+            try
+            {
+                using (var file = File.OpenRead(filePath))
+                {
+                    var xs = new XmlSerializer(typeof(Preset));
+                    var preset = (Preset)xs.Deserialize(file);
+                    ReplaceChartWithCrpPreset(preset);
+                    SetLoadedPresetPath(filePath);
+                    Analytics.TrackEvent("Loaded a preset");
+                }
+            }
+            catch
+            {
+                QuietMessageBox.Show(Strings.errorInvalidPresetFile, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -964,13 +1087,15 @@ namespace CustomRPC
         /// </summary>
         private void SavePreset(object sender, EventArgs e)
         {
+            if (IsCyclingEditLocked())
+                return;
+
             var xs = new XmlSerializer(typeof(Preset));
             var presetFile = new SaveFileDialog()
             {
-                Filter = slotService.Slots.Count > 1
-                    ? "Multi Activity Preset|*.cmrp|CustomRP Preset|*.crp|All supported|*.cmrp;*.crp"
-                    : "CustomRP Preset|*.crp|Multi Activity Preset|*.cmrp|All supported|*.crp;*.cmrp",
-                DefaultExt = slotService.Slots.Count > 1 ? "cmrp" : "crp",
+                Filter = SavePresetFilter,
+                FilterIndex = 1,
+                DefaultExt = "cmrp",
             };
 
             if (presetFile.ShowDialog() != DialogResult.OK || presetFile.FileNames.Length == 0)
@@ -983,30 +1108,41 @@ namespace CustomRPC
                     SaveEditorToSelectedSlot();
 
                     string savePath = presetFile.FileName;
-                    if (!IsMultiSlotPresetFile(savePath) &&
-                        slotService.Slots.Count > 1 &&
-                        MessageBox.Show(
-                            this,
-                            "You have multiple activities. Multi-activity presets must use the .cmrp format to save all of them.\n\nSave as .cmrp now?",
-                            Strings.information,
-                            MessageBoxButtons.YesNo,
-                            MessageBoxIcon.Information) == DialogResult.Yes)
-                    {
-                        savePath = Path.ChangeExtension(savePath, MultiSlotPresetExtension);
-                    }
+                    var selectedSlots = GetSelectedSlotsInChartOrder();
 
                     if (IsMultiSlotPresetFile(savePath))
                     {
-                        SaveMultiSlotPreset(savePath);
+                        // Multi-select: save only selected slots. Single/none: save entire chart.
+                        if (selectedSlots.Count > 1)
+                        {
+                            SaveMultiSlotPreset(savePath, selectedSlots);
+                            ClearLoadedPresetPath();
+                        }
+                        else
+                        {
+                            SaveMultiSlotPreset(savePath);
+                            SetLoadedPresetPath(savePath);
+                        }
                     }
                     else
                     {
-                        var slot = GetSelectedSlot();
-                        if (slot == null)
-                            return;
+                        if (selectedSlots.Count > 1)
+                        {
+                            SaveSelectedSlotsAsSeparateCrpFiles(savePath, selectedSlots, xs);
+                            ClearLoadedPresetPath();
+                        }
+                        else
+                        {
+                            var slot = selectedSlots.Count == 1
+                                ? selectedSlots[0]
+                                : (GetSelectedSlot() ?? (slotService.Slots.Count > 0 ? slotService.Slots[0] : null));
+                            if (slot == null)
+                                return;
 
-                        using (var file = File.Create(savePath))
-                            xs.Serialize(file, slot.ToPreset());
+                            using (var file = File.Create(savePath))
+                                xs.Serialize(file, slot.ToPreset());
+                            SetLoadedPresetPath(savePath);
+                        }
                     }
 
                     Analytics.TrackEvent("Saved a preset");
@@ -1015,10 +1151,304 @@ namespace CustomRPC
                 }
                 catch (Exception ex)
                 {
-                    if (MessageBox.Show(ex.Message, Strings.error, MessageBoxButtons.RetryCancel, MessageBoxIcon.Error) == DialogResult.Cancel)
+                    if (QuietMessageBox.Show(ex.Message, Strings.error, MessageBoxButtons.RetryCancel, MessageBoxIcon.Error) == DialogResult.Cancel)
                         return;
                 }
             }
+        }
+
+        void SetLoadedPresetPath(string path)
+        {
+            loadedPresetPath = string.IsNullOrWhiteSpace(path) ? null : path;
+            UpdateSaveChangesMenuItem();
+            UpdateActivePresetMenuLabels();
+            SaveSlotsToStorage();
+        }
+
+        void ClearLoadedPresetPath()
+        {
+            loadedPresetPath = null;
+            UpdateSaveChangesMenuItem();
+            UpdateActivePresetMenuLabels();
+            SaveSlotsToStorage();
+        }
+
+        void SetupActivePresetMenuLabels()
+        {
+            if (menuStrip == null || toolStripLabelActivePresetPrefix != null)
+                return;
+
+            // Right-aligned items lay out right-to-left in collection order:
+            // add the name first so it sits at the far right, prefix to its left.
+            // Negative left margin on the name cancels ToolStrip's default item gap
+            // so it reads as a single space: "Active Preset: (name)".
+            toolStripLabelActivePresetName = new ToolStripLabel
+            {
+                Alignment = ToolStripItemAlignment.Right,
+                AutoSize = true,
+                Margin = new Padding(-6, 1, 8, 2),
+                Padding = Padding.Empty,
+            };
+            toolStripLabelActivePresetPrefix = new ToolStripLabel
+            {
+                Alignment = ToolStripItemAlignment.Right,
+                AutoSize = true,
+                Margin = new Padding(8, 1, 0, 2),
+                Padding = Padding.Empty,
+            };
+
+            menuStrip.Items.Add(toolStripLabelActivePresetName);
+            menuStrip.Items.Add(toolStripLabelActivePresetPrefix);
+            Resize += (s, e) => UpdateActivePresetMenuLabels();
+        }
+
+        void UpdateActivePresetMenuLabels()
+        {
+            if (toolStripLabelActivePresetPrefix == null || toolStripLabelActivePresetName == null)
+                return;
+
+            string nameInParens;
+
+            if (settings != null && settings.alternatingPresetsEnabled)
+            {
+                nameInParens = BuildActiveCyclePresetMenuName();
+            }
+            else if (!string.IsNullOrWhiteSpace(loadedPresetPath))
+            {
+                nameInParens = "(" + Path.GetFileName(loadedPresetPath) + ")";
+            }
+            else
+            {
+                nameInParens = "(no preset loaded)";
+            }
+
+            nameInParens = TruncateActivePresetName("", nameInParens);
+
+            toolStripLabelActivePresetPrefix.Text = "";
+            toolStripLabelActivePresetPrefix.Visible = false;
+            toolStripLabelActivePresetName.Text = nameInParens;
+            toolStripLabelActivePresetName.ForeColor = CurrentColors.TextInactive;
+            toolStripLabelActivePresetPrefix.ToolTipText = null;
+
+            string tooltipPath = null;
+            if (settings != null && settings.alternatingPresetsEnabled)
+            {
+                if (!string.IsNullOrWhiteSpace(pendingCycleTargetPath))
+                    tooltipPath = (cycleTransitionFromPath ?? activeCyclePresetPath ?? loadedPresetPath) +
+                        " --> " + pendingCycleTargetPath;
+                else if (!string.IsNullOrWhiteSpace(activeCyclePresetPath))
+                    tooltipPath = activeCyclePresetPath;
+                else
+                    tooltipPath = loadedPresetPath;
+            }
+            else
+            {
+                tooltipPath = loadedPresetPath;
+            }
+
+            toolStripLabelActivePresetName.ToolTipText =
+                nameInParens.Contains("…") || nameInParens.Contains("...")
+                    ? tooltipPath
+                    : null;
+        }
+
+        string TruncateActivePresetName(string prefix, string nameInParens)
+        {
+            if (menuStrip == null || toolStripLabelActivePresetPrefix == null)
+                return nameInParens;
+
+            int leftMenusWidth = 0;
+            foreach (ToolStripItem item in menuStrip.Items)
+            {
+                if (item == toolStripLabelActivePresetPrefix || item == toolStripLabelActivePresetName)
+                    continue;
+                if (item.Available)
+                    leftMenusWidth += item.Width;
+            }
+
+            int available = menuStrip.Width - leftMenusWidth - 24;
+            if (available < 80)
+                available = 80;
+
+            Font font = menuStrip.Font;
+            int prefixWidth = TextRenderer.MeasureText(prefix, font).Width;
+            int maxNameWidth = Math.Max(40, available - prefixWidth);
+
+            if (TextRenderer.MeasureText(nameInParens, font).Width <= maxNameWidth)
+                return nameInParens;
+
+            const string arrow = " --> ";
+            int arrowAt = nameInParens.IndexOf(arrow, StringComparison.Ordinal);
+            if (arrowAt > 0)
+            {
+                string left = nameInParens.Substring(0, arrowAt);
+                string right = nameInParens.Substring(arrowAt + arrow.Length);
+                string leftInner = StripCycleParen(left);
+                string rightInner = StripCycleParen(right);
+
+                while (leftInner.Length > 1 || rightInner.Length > 1)
+                {
+                    if (leftInner.Length >= rightInner.Length && leftInner.Length > 1)
+                        leftInner = leftInner.Substring(0, leftInner.Length - 1);
+                    else if (rightInner.Length > 1)
+                        rightInner = rightInner.Substring(0, rightInner.Length - 1);
+                    else
+                        break;
+
+                    string candidate = "(" + leftInner.TrimEnd() + "…)" + arrow + "(" + rightInner.TrimEnd() + "…)";
+                    if (TextRenderer.MeasureText(candidate, font).Width <= maxNameWidth)
+                        return candidate;
+                }
+
+                return "(…)" + arrow + "(…)";
+            }
+
+            string inner = StripCycleParen(nameInParens);
+            string ellipsis = "…";
+            while (inner.Length > 1)
+            {
+                inner = inner.Substring(0, inner.Length - 1);
+                string candidate = "(" + inner.TrimEnd() + ellipsis + ")";
+                if (TextRenderer.MeasureText(candidate, font).Width <= maxNameWidth)
+                    return candidate;
+            }
+
+            return "(…)";
+        }
+
+        static string StripCycleParen(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return "";
+            if (value.StartsWith("(") && value.EndsWith(")") && value.Length > 2)
+                return value.Substring(1, value.Length - 2);
+            return value;
+        }
+
+        void UpdateSaveChangesMenuItem()
+        {
+            UpdatePresetFileMenuItems();
+        }
+
+        void UpdatePresetFileMenuItems()
+        {
+            bool locked = IsCyclingEditLocked();
+
+            if (newPresetToolStripMenuItem != null)
+                newPresetToolStripMenuItem.Enabled = !locked;
+            if (loadPresetToolStripMenuItem != null)
+                loadPresetToolStripMenuItem.Enabled = !locked;
+            if (savePresetToolStripMenuItem != null)
+                savePresetToolStripMenuItem.Enabled = !locked;
+
+            if (saveChangesToolStripMenuItem == null)
+                return;
+
+            saveChangesToolStripMenuItem.Enabled =
+                !locked &&
+                !string.IsNullOrWhiteSpace(loadedPresetPath) &&
+                File.Exists(loadedPresetPath);
+        }
+
+        /// <summary>
+        /// Overwrites the currently loaded preset file in place (the only write path for an already-loaded preset).
+        /// </summary>
+        private void SaveChanges(object sender, EventArgs e)
+        {
+            if (IsCyclingEditLocked())
+                return;
+
+            if (string.IsNullOrWhiteSpace(loadedPresetPath) || !File.Exists(loadedPresetPath))
+            {
+                QuietMessageBox.Show(
+                    this,
+                    ActivitiesUiText.SaveChangesNoLoadedPreset,
+                    Application.ProductName,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                UpdateSaveChangesMenuItem();
+                return;
+            }
+
+            string presetName = Path.GetFileName(loadedPresetPath);
+            if (QuietMessageBox.Show(
+                    this,
+                    string.Format(ActivitiesUiText.SaveChangesConfirm, presetName),
+                    Application.ProductName,
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
+
+            while (true)
+            {
+                try
+                {
+                    SaveEditorToSelectedSlot();
+
+                    if (IsMultiSlotPresetFile(loadedPresetPath))
+                    {
+                        SaveMultiSlotPreset(loadedPresetPath);
+                    }
+                    else
+                    {
+                        var slot = GetSelectedSlot() ?? (slotService.Slots.Count > 0 ? slotService.Slots[0] : null);
+                        if (slot == null)
+                            return;
+
+                        var xs = new XmlSerializer(typeof(Preset));
+                        using (var file = File.Create(loadedPresetPath))
+                            xs.Serialize(file, slot.ToPreset());
+                    }
+
+                    Analytics.TrackEvent("Saved changes to loaded preset");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    if (QuietMessageBox.Show(ex.Message, Strings.error, MessageBoxButtons.RetryCancel, MessageBoxIcon.Error) == DialogResult.Cancel)
+                        return;
+                }
+            }
+        }
+
+        void SaveSelectedSlotsAsSeparateCrpFiles(string savePath, List<PresenceSlot> slots, XmlSerializer xs)
+        {
+            string directory = Path.GetDirectoryName(savePath) ?? "";
+            string baseName = Path.GetFileNameWithoutExtension(savePath);
+            string extension = Path.GetExtension(savePath);
+            if (string.IsNullOrEmpty(extension))
+                extension = ".crp";
+
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var slot in slots)
+            {
+                string idPart = string.IsNullOrWhiteSpace(slot.ApplicationId)
+                    ? "no-id"
+                    : SanitizeFileNamePart(slot.ApplicationId.Trim());
+
+                string fullPath = Path.Combine(directory, $"{baseName}_{idPart}{extension}");
+                int suffix = 2;
+                while (!usedNames.Add(fullPath))
+                {
+                    fullPath = Path.Combine(directory, $"{baseName}_{idPart}_{suffix}{extension}");
+                    suffix++;
+                }
+
+                using (var file = File.Create(fullPath))
+                    xs.Serialize(file, slot.ToPreset());
+            }
+        }
+
+        static string SanitizeFileNamePart(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return "no-id";
+
+            var invalid = Path.GetInvalidFileNameChars();
+            var chars = value.Select(c => Array.IndexOf(invalid, c) >= 0 ? '_' : c).ToArray();
+            string cleaned = new string(chars).Trim(' ', '.');
+            return string.IsNullOrEmpty(cleaned) ? "no-id" : cleaned;
         }
 
         /// <summary>
@@ -1032,7 +1462,7 @@ namespace CustomRPC
 
             if (id == "")
             {
-                MessageBox.Show(Strings.errorNoID, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1);
+                QuietMessageBox.Show(Strings.errorNoID, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error, MessageBoxDefaultButton.Button1);
                 return;
             }
 
@@ -1044,6 +1474,7 @@ namespace CustomRPC
         /// </summary>
         private void Quit(object sender, EventArgs e)
         {
+            StopAlternatingPresetsTimer();
             SaveSlotsToStorage();
             slotService?.Dispose();
 
@@ -1223,7 +1654,8 @@ namespace CustomRPC
 
             if (!loading)
             {
-                SaveEditorToSelectedSlot();
+                if (!IsCyclingEditLocked())
+                    SaveEditorToSelectedSlot();
                 SaveSlotsToStorage();
             }
 
@@ -1232,8 +1664,8 @@ namespace CustomRPC
             if (type != ActivityType.Playing)
                 canHaveParty = false;
 
-            flowLayoutPanelParty.Enabled = canHaveParty;
-            panelTimestamps.Enabled = canHaveTimestamps;
+            flowLayoutPanelParty.Enabled = canHaveParty && !IsCyclingEditLocked();
+            panelTimestamps.Enabled = canHaveTimestamps && !IsCyclingEditLocked();
         }
 
         /// <summary>
@@ -1250,7 +1682,8 @@ namespace CustomRPC
 
             if (!loading)
             {
-                SaveEditorToSelectedSlot();
+                if (!IsCyclingEditLocked())
+                    SaveEditorToSelectedSlot();
                 SaveSlotsToStorage();
             }
         }
@@ -1387,7 +1820,7 @@ namespace CustomRPC
                 }
                 catch
                 {
-                    MessageBox.Show(Strings.errorNoInternet, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    QuietMessageBox.Show(Strings.errorNoInternet, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -1403,7 +1836,11 @@ namespace CustomRPC
 
             if (ctrl is Button button)
             {
-                using (var background = new SolidBrush(button.BackColor))
+                // Same disabled text treatment for Slot / All action buttons in both themes.
+                Color fill = settings.darkMode
+                    ? (button.BackColor.IsEmpty ? CurrentColors.BgButton : button.BackColor)
+                    : SystemColors.Control;
+                using (var background = new SolidBrush(fill))
                     e.Graphics.FillRectangle(background, button.ClientRectangle);
 
                 TextRenderer.DrawText(
@@ -1451,6 +1888,9 @@ namespace CustomRPC
         /// </summary>
         private void Connect()
         {
+            if (IsCyclingEditLocked())
+                return;
+
             SaveEditorToSelectedSlot();
             SaveSlotsToStorage();
 
@@ -1495,6 +1935,9 @@ namespace CustomRPC
         /// </summary>
         private void Disconnect()
         {
+            if (IsCyclingEditLocked())
+                return;
+
             var slot = GetSelectedSlot();
             if (slot != null)
                 DisconnectSlot(slot);
@@ -1524,6 +1967,9 @@ namespace CustomRPC
         /// </summary>
         private void Update(object sender, EventArgs e)
         {
+            if (IsCyclingEditLocked())
+                return;
+
             SaveSlotsToStorage();
             SetPresence();
         }

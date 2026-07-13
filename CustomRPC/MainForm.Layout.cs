@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -23,6 +24,12 @@ namespace CustomRPC
         const int ActivitiesApplicationIdColumnWidth = 145;
         const int ActivitiesStatusColumnWidth = 86;
         const int ActivitiesEnabledColumnWidth = 60;
+        // Legacy (Enabled hidden): fixed columns; Status fills remaining client width
+        // so it stays flush when the scrollbar is absent and shrinks when it appears.
+        const int LegacyActivitiesNameColumnWidth = 133;
+        const int LegacyActivitiesTypeColumnWidth = 70;
+        const int LegacyActivitiesApplicationIdColumnWidth = 147;
+        const int LegacyActivitiesStatusColumnMinWidth = 60;
 
         bool layoutInitialized;
 
@@ -79,11 +86,20 @@ namespace CustomRPC
             PlaceSeparator(panelSeparator4, ref y);
 
             PlaceButtonSection(blockLeft, y);
+            y = Math.Max(textBoxButton1URL.Bottom, textBoxButton2URL.Bottom);
 
-            int contentBottom = Math.Max(textBoxButton1URL.Bottom, textBoxButton2URL.Bottom);
+            PlaceAlternatingPresetsSection(blockLeft, ref y);
+
+            int contentBottom = y;
             PositionBottomButtonRow(contentBottom);
 
-            foreach (var separator in new[] { panelSeparator1, panelSeparator2, panelSeparator3, panelSeparator4 })
+            var separators = new List<Panel> { panelSeparator1, panelSeparator2, panelSeparator3, panelSeparator4 };
+            if (panelSeparator5 != null)
+                separators.Add(panelSeparator5);
+            if (panelSeparator6 != null)
+                separators.Add(panelSeparator6);
+
+            foreach (var separator in separators)
             {
                 separator.Width = ClientSize.Width;
                 separator.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -99,7 +115,7 @@ namespace CustomRPC
                 return;
 
             tableLayoutPanelButtons.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            tableLayoutPanelButtons.Location = new Point(0, contentBottom + LayoutBottomGap);
+            tableLayoutPanelButtons.Location = new Point(0, contentBottom + 2);
             tableLayoutPanelButtons.Width = ClientSize.Width;
 
             int neededHeight = tableLayoutPanelButtons.Bottom + LayoutBottomGap;
@@ -114,11 +130,28 @@ namespace CustomRPC
             if (listViewSlots == null || listViewSlots.Columns.Count < 5)
                 return;
 
-            listViewSlots.Columns[0].Width = ActivitiesNameColumnWidth;
-            listViewSlots.Columns[1].Width = ActivitiesTypeColumnWidth;
-            listViewSlots.Columns[2].Width = ActivitiesApplicationIdColumnWidth;
-            listViewSlots.Columns[3].Width = ActivitiesStatusColumnWidth;
-            listViewSlots.Columns[4].Width = IsMultiSlotRpcMode() ? ActivitiesEnabledColumnWidth : 0;
+            if (IsMultiSlotRpcMode())
+            {
+                listViewSlots.Columns[0].Width = ActivitiesNameColumnWidth;
+                listViewSlots.Columns[1].Width = ActivitiesTypeColumnWidth;
+                listViewSlots.Columns[2].Width = ActivitiesApplicationIdColumnWidth;
+                listViewSlots.Columns[3].Width = ActivitiesStatusColumnWidth;
+                listViewSlots.Columns[4].Width = ActivitiesEnabledColumnWidth;
+                return;
+            }
+
+            listViewSlots.Columns[0].Width = LegacyActivitiesNameColumnWidth;
+            listViewSlots.Columns[1].Width = LegacyActivitiesTypeColumnWidth;
+            listViewSlots.Columns[2].Width = LegacyActivitiesApplicationIdColumnWidth;
+            listViewSlots.Columns[4].Width = 0;
+
+            int used = LegacyActivitiesNameColumnWidth +
+                LegacyActivitiesTypeColumnWidth +
+                LegacyActivitiesApplicationIdColumnWidth;
+            int clientWidth = listViewSlots.ClientSize.Width;
+            listViewSlots.Columns[3].Width = clientWidth > used
+                ? clientWidth - used
+                : LegacyActivitiesStatusColumnMinWidth;
         }
 
         void ApplyActivitiesListColumnWidths()
@@ -136,12 +169,24 @@ namespace CustomRPC
             if (tableLayoutPanelActivitiesTitle != null)
             {
                 tableLayoutPanelActivitiesTitle.Location = new Point(contentLeft, cy);
+
+                if (labelCyclingActiveBanner != null)
+                {
+                    EnsureCyclingActiveBannerParented();
+                    int bannerY = cy + Math.Max(0,
+                        (tableLayoutPanelActivitiesTitle.Height - labelCyclingActiveBanner.PreferredHeight) / 2);
+                    int bannerX = contentLeft + contentWidth - labelCyclingActiveBanner.PreferredWidth;
+                    bannerX = Math.Max(tableLayoutPanelActivitiesTitle.Right + 8, bannerX);
+                    labelCyclingActiveBanner.Location = new Point(bannerX, bannerY);
+                }
+
                 cy = tableLayoutPanelActivitiesTitle.Bottom + LayoutSeparatorPadding;
             }
 
             listViewSlots.Location = new Point(contentLeft, cy);
             listViewSlots.Width = contentWidth;
             ApplyActivitiesListColumnWidths();
+            SyncActivitiesListScrollbar();
             flowLayoutPanelSlotActions.Location = new Point(contentLeft, listViewSlots.Bottom + LayoutActivitiesSlotActionsGap);
 
             int neededHeight = flowLayoutPanelSlotActions.Bottom + LayoutActivitiesPanelBottomGap;

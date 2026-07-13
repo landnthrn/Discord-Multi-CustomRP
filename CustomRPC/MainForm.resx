@@ -2053,7 +2053,7 @@ To take effect, both fields should be more than 0.</value>
     <value>0</value>
   </data>
   <data name="numericUpDownPartySize.TextAlign" type="System.Windows.Forms.HorizontalAlignment, System.Windows.Forms">
-    <value>Right</value>
+    <value>Left</value>
   </data>
   <data name="&gt;&gt;numericUpDownPartySize.Name" xml:space="preserve">
     <value>numericUpDownPartySize</value>
@@ -2080,7 +2080,7 @@ To take effect, both fields should be more than 0.</value>
     <value>1</value>
   </data>
   <data name="numericUpDownPartyMax.TextAlign" type="System.Windows.Forms.HorizontalAlignment, System.Windows.Forms">
-    <value>Right</value>
+    <value>Left</value>
   </data>
   <data name="&gt;&gt;numericUpDownPartyMax.Name" xml:space="preserve">
     <value>numericUpDownPartyMax</value>

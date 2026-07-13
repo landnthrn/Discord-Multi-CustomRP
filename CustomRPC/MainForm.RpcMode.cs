@@ -64,6 +64,8 @@ namespace CustomRPC
             if (GetMultiSlotRpcMode() == mode)
                 return;
 
+            bool switchingToMulti = mode != MultiSlotRpcMode.SingleProcess;
+
             SaveEditorToSelectedSlot(refreshList: false);
             SaveSlotsToStorage();
 
@@ -74,10 +76,37 @@ namespace CustomRPC
             if (slotService != null)
                 slotService.RpcMode = mode;
 
+            // Legacy ignores Enabled; Multi-RP enforces the 5-enabled cap (same as Add/Duplicate).
+            if (switchingToMulti)
+                EnforceEnabledSlotCapForMultiMode();
+
             UpdateMultiSlotRpcModeMenuChecks();
             UpdateActivitiesPanelForMode();
+            UpdateCyclingEditLock();
+            SyncTrayMenuForRpcMode();
             RefreshSlotListView();
             UpdateGlobalConnectionUi();
+            SaveSlotsToStorage();
+        }
+
+        /// <summary>
+        /// Keeps chart order: first MaxEnabledActivities already-Enabled slots stay on; the rest turn off.
+        /// </summary>
+        void EnforceEnabledSlotCapForMultiMode()
+        {
+            if (slotService == null)
+                return;
+
+            int enabledCount = 0;
+            foreach (var slot in slotService.Slots)
+            {
+                if (!slot.Enabled)
+                    continue;
+
+                enabledCount++;
+                if (enabledCount > MaxEnabledActivities)
+                    slot.Enabled = false;
+            }
         }
 
         MultiSlotRpcMode GetMultiSlotRpcMode()
@@ -110,6 +139,7 @@ namespace CustomRPC
             SyncMatchListOrderToggle();
             SyncActivitiesListColumns();
             UpdateSlotActionButtons();
+            SyncTrayMenuForRpcMode();
 
             if (layoutInitialized)
                 ApplyMainFormLayout();

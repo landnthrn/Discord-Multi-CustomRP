@@ -39,6 +39,7 @@ namespace CustomRPC
         Label labelActivitiesInfo;
         DarkHoverPopup activitiesInfoHoverPopup;
         DarkHoverPopup matchOrderHoverPopup;
+        DarkHoverPopup matchOrderDelayHoverPopup;
         Label labelActivitiesHint;
         Label labelActivitiesConstraints;
 
@@ -115,12 +116,26 @@ namespace CustomRPC
             buttonUpdatePresence.Text = "Update Slot";
             SetupBulkActionButtonsRow();
             WireSlotEditorEvents();
+            SetupAlternatingPresetsSection();
+
+            numericUpDownPartySize.TextAlign = HorizontalAlignment.Left;
+            numericUpDownPartyMax.TextAlign = HorizontalAlignment.Left;
 
             if (GetSelectedSlot() == null && slotService.Slots.Count > 0)
                 selectedSlotId = slotService.Slots[0].SlotId;
 
             LoadSelectedSlotToEditor();
             RefreshSlotListView();
+
+            // Cycle Presets left on across restart: snapshot after the editor is hydrated.
+            if (settings.alternatingPresetsEnabled)
+            {
+                activeCyclePresetPath = loadedPresetPath;
+                SeedCycleIndexFromCurrentPreset();
+                CaptureCycleBaseline();
+                UpdateCyclingEditLock();
+                SyncAlternatingPresetsTimer();
+            }
 
             SetupMultiSlotRpcModeMenu();
             UpdateGlobalConnectionUi();
@@ -171,6 +186,11 @@ namespace CustomRPC
                     }
 
                     selectedSlotId = config.SelectedSlotId ?? "";
+                    if (!string.IsNullOrWhiteSpace(config.LoadedPresetPath) && File.Exists(config.LoadedPresetPath))
+                        loadedPresetPath = config.LoadedPresetPath;
+                    else
+                        loadedPresetPath = null;
+
                     if (slotService.Slots.Count > 0)
                         BackfillFromLegacySettings();
                     return;
@@ -233,7 +253,7 @@ namespace CustomRPC
             {
                 AutoSize = true,
                 Text = "\u24D8",
-                Cursor = Cursors.Help,
+                Cursor = Cursors.Default,
                 Font = new Font(Font.FontFamily, 14f, FontStyle.Regular),
             };
             labelActivitiesInfo.MouseEnter += ActivitiesInfoIcon_MouseEnter;
@@ -246,6 +266,10 @@ namespace CustomRPC
             matchOrderHoverPopup = new DarkHoverPopup();
             matchOrderHoverPopup.MouseEnter += (_, __) => matchOrderHoverPopup.CancelHide();
             matchOrderHoverPopup.MouseLeave += (_, __) => matchOrderHoverPopup.ScheduleHide();
+
+            matchOrderDelayHoverPopup = new DarkHoverPopup();
+            matchOrderDelayHoverPopup.MouseEnter += (_, __) => matchOrderDelayHoverPopup.CancelHide();
+            matchOrderDelayHoverPopup.MouseLeave += (_, __) => matchOrderDelayHoverPopup.ScheduleHide();
 
             FitToolbarRowCell(labelActivities, ContentAlignment.MiddleLeft);
             FitToolbarRowCell(labelActivitiesInfo, ContentAlignment.MiddleLeft);
@@ -291,7 +315,7 @@ namespace CustomRPC
                 View = View.Details,
                 FullRowSelect = true,
                 HideSelection = false,
-                MultiSelect = false,
+                MultiSelect = true,
                 HeaderStyle = ColumnHeaderStyle.Nonclickable,
                 BorderStyle = BorderStyle.FixedSingle,
                 AllowDrop = true,
@@ -318,6 +342,8 @@ namespace CustomRPC
             listViewSlots.DragOver += ListViewSlots_DragOver;
             listViewSlots.DragDrop += ListViewSlots_DragDrop;
             listViewSlots.DragLeave += ListViewSlots_DragLeave;
+            listViewSlots.MouseWheel += ListViewSlots_MouseWheelKeepScrollbar;
+            listViewSlots.Paint += ListViewSlots_PaintKeepScrollbar;
 
             flowLayoutPanelSlotActions = new FlowLayoutPanel
             {
@@ -363,7 +389,7 @@ namespace CustomRPC
             labelMatchOrderText = new Label
             {
                 AutoSize = true,
-                Text = "Match order",
+                Text = "Match Order",
                 Margin = new Padding(0, MatchOrderLabelTopMargin, 0, 0),
                 Cursor = Cursors.Default,
             };
@@ -377,13 +403,15 @@ namespace CustomRPC
                 Text = "Delay",
                 Margin = new Padding(8, MatchOrderLabelTopMargin, 3, 0),
             };
+            labelMatchOrderDelay.MouseEnter += MatchOrderDelay_MouseEnter;
+            labelMatchOrderDelay.MouseLeave += MatchOrderDelay_MouseLeave;
 
             numericUpDownMatchOrderDelay = new NumericUpDown
             {
                 Minimum = 1,
                 Maximum = 300,
                 DecimalPlaces = 0,
-                TextAlign = HorizontalAlignment.Right,
+                TextAlign = HorizontalAlignment.Left,
                 Size = new Size(MatchOrderDelayInputWidth - 2, 22),
                 Margin = new Padding(0, MatchOrderNumericTopMargin, 0, 0),
             };
@@ -452,7 +480,7 @@ namespace CustomRPC
 
             int labelHeight = labelMatchOrderText != null
                 ? labelMatchOrderText.PreferredHeight
-                : TextRenderer.MeasureText("Match order", Font).Height;
+                : TextRenderer.MeasureText("Match Order", Font).Height;
             int labelCenterY = MatchOrderLabelTopMargin + labelHeight / 2;
             int checkTop = labelCenterY - checkBoxMatchDiscordListOrder.Height / 2 + MatchOrderCheckBoxNudgeDown;
 
@@ -488,10 +516,7 @@ namespace CustomRPC
                 return;
             }
 
-            if (e.ItemIndex < 0)
-                return;
-
-            DrawActivitiesListRow(e.Graphics, e.Item, e.Bounds.Top, e.Bounds.Height);
+            // Details view: cells are painted in DrawSubItem (avoids clip / partial-invalidate wipe bugs).
             e.DrawDefault = false;
         }
 
@@ -503,25 +528,22 @@ namespace CustomRPC
                 return;
             }
 
+            // Paint only this cell; extend the last column to the client right edge so
+            // multi-select highlight is full-width without wiping other columns on partial redraw.
+            var backgroundBounds = e.Bounds;
+            if (e.ColumnIndex == listViewSlots.Columns.Count - 1)
+                backgroundBounds.Width = Math.Max(backgroundBounds.Width, listViewSlots.ClientSize.Width - backgroundBounds.X);
+
+            using (var brush = new SolidBrush(GetActivitiesListRowBackColor(e.Item)))
+                e.Graphics.FillRectangle(brush, backgroundBounds);
+
+            DrawActivitiesListCellText(e.Graphics, e.SubItem.Text, e.Bounds, e.Item);
             e.DrawDefault = false;
         }
 
         static readonly TextFormatFlags ActivitiesListCellTextFlags =
             TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis |
             TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
-
-        void DrawActivitiesListRow(Graphics graphics, ListViewItem item, int top, int height)
-        {
-            PaintActivitiesListRowBackground(graphics, item, top, height);
-
-            int x = 0;
-            for (int column = 0; column < listViewSlots.Columns.Count && column < item.SubItems.Count; column++)
-            {
-                int width = listViewSlots.Columns[column].Width;
-                DrawActivitiesListCellText(graphics, item.SubItems[column].Text, new Rectangle(x, top, width, height), item);
-                x += width;
-            }
-        }
 
         void DrawActivitiesListCellText(Graphics graphics, string text, Rectangle bounds, ListViewItem item)
         {
@@ -537,12 +559,6 @@ namespace CustomRPC
                 ActivitiesListCellTextFlags);
         }
 
-        void PaintActivitiesListRowBackground(Graphics graphics, ListViewItem item, int top, int height)
-        {
-            using (var brush = new SolidBrush(GetActivitiesListRowBackColor(item)))
-                graphics.FillRectangle(brush, 0, top, listViewSlots.ClientRectangle.Width, height);
-        }
-
         Color GetActivitiesListRowBackColor(ListViewItem item)
         {
             if (!item.Selected)
@@ -555,11 +571,14 @@ namespace CustomRPC
 
         SlotConfig CreateSlotConfig()
         {
-            return SlotStorage.FromSlots(slotService.Slots, selectedSlotId);
+            return SlotStorage.FromSlots(slotService.Slots, selectedSlotId, loadedPresetPath);
         }
 
         void ListViewSlots_ItemDrag(object sender, ItemDragEventArgs e)
         {
+            if (IsCyclingEditLocked())
+                return;
+
             if (e.Item is ListViewItem item)
             {
                 slotDragSourceIndex = item.Index;
@@ -570,11 +589,22 @@ namespace CustomRPC
 
         void ListViewSlots_DragEnter(object sender, DragEventArgs e)
         {
+            if (IsCyclingEditLocked())
+            {
+                e.Effect = DragDropEffects.None;
+                return;
+            }
+
             e.Effect = e.Data.GetDataPresent(typeof(ListViewItem)) ? DragDropEffects.Move : DragDropEffects.None;
         }
 
         void ListViewSlots_DragOver(object sender, DragEventArgs e)
         {
+            if (IsCyclingEditLocked())
+            {
+                e.Effect = DragDropEffects.None;
+                return;
+            }
             if (!e.Data.GetDataPresent(typeof(ListViewItem)))
             {
                 e.Effect = DragDropEffects.None;
@@ -616,6 +646,9 @@ namespace CustomRPC
         void ListViewSlots_DragDrop(object sender, DragEventArgs e)
         {
             listViewSlots.InsertionMark.Index = -1;
+
+            if (IsCyclingEditLocked())
+                return;
 
             if (slotDragSourceIndex < 0 || slotDragSourceIndex >= slotService.Slots.Count)
                 return;
@@ -794,7 +827,7 @@ namespace CustomRPC
 
         void SlotEditor_IdChanged(object sender, EventArgs e)
         {
-            if (loading)
+            if (loading || IsCyclingEditLocked())
                 return;
 
             EnsureSelectedSlot();
@@ -806,12 +839,12 @@ namespace CustomRPC
             UpdateListItemForSlot(slot, keepEditorFocus: true);
             UpdateSelectedSlotIdFieldColor(slot);
             UpdateGlobalConnectionUi();
-            SlotStorage.Save(CreateSlotConfig());
+            SaveSlotsToStorage();
         }
 
         void SlotEditor_NameChanged(object sender, EventArgs e)
         {
-            if (loading)
+            if (loading || IsCyclingEditLocked())
                 return;
 
             var slot = GetSelectedSlot();
@@ -824,7 +857,7 @@ namespace CustomRPC
                 : slot.Name;
 
             UpdateListItemForSlot(slot, keepEditorFocus: true);
-            SlotStorage.Save(CreateSlotConfig());
+            SaveSlotsToStorage();
         }
 
         void EnsureSelectedSlot()
@@ -845,7 +878,36 @@ namespace CustomRPC
                 UpdateListItemForSlot(slot);
 
             if (persistToDisk)
+                PersistSlotsToDisk();
+        }
+
+        void PersistSlotsToDisk()
+        {
+            // Mid-cycle charts can briefly contain overlapping App IDs; keep the pre-cycle baseline on disk.
+            if (IsCyclingEditLocked() && cycleBaselineSlots != null)
+            {
+                SlotStorage.Save(SlotStorage.FromSlots(
+                    cycleBaselineSlots,
+                    cycleBaselineSelectedId,
+                    loadedPresetPath));
+                return;
+            }
+
+            SlotStorage.Save(CreateSlotConfig());
+        }
+
+        void SaveSlotsToStorage()
+        {
+            if (loading)
+            {
                 SlotStorage.Save(CreateSlotConfig());
+                return;
+            }
+
+            if (!IsCyclingEditLocked())
+                SaveEditorToSelectedSlot(refreshList: false);
+
+            PersistSlotsToDisk();
         }
 
         void ApplyActivitiesPanelTheme()
@@ -858,11 +920,13 @@ namespace CustomRPC
             if (labelActivitiesInfo != null)
                 labelActivitiesInfo.ForeColor = CurrentColors.TextInactive;
 
+            UpdateCyclingStatusBanner();
+
             if (listViewSlots != null)
             {
                 listViewSlots.BackColor = CurrentColors.BgTextFields;
                 listViewSlots.ForeColor = CurrentColors.TextColor;
-                WinApi.ApplyListViewDarkScrollbars(listViewSlots);
+                WinApi.ApplyListViewThemeScrollbars(listViewSlots);
                 listViewSlots.Invalidate(true);
             }
 
@@ -870,10 +934,22 @@ namespace CustomRPC
                 checkBoxMatchDiscordListOrder.ForeColor = CurrentColors.TextColor;
 
             if (labelMatchOrderText != null)
-                labelMatchOrderText.ForeColor = CurrentColors.TextColor;
+            {
+                labelMatchOrderText.ForeColor = IsCyclingEditLocked() || !IsMultiSlotRpcMode()
+                    ? CurrentColors.TextInactive
+                    : CurrentColors.TextColor;
+            }
 
             if (labelMatchOrderDelay != null)
-                labelMatchOrderDelay.ForeColor = CurrentColors.TextColor;
+            {
+                bool delayActive = IsMultiSlotRpcMode() &&
+                    checkBoxMatchDiscordListOrder != null &&
+                    checkBoxMatchDiscordListOrder.Checked &&
+                    !IsCyclingEditLocked();
+                labelMatchOrderDelay.ForeColor = delayActive
+                    ? CurrentColors.TextColor
+                    : CurrentColors.TextInactive;
+            }
 
             if (numericUpDownMatchOrderDelay != null)
             {
@@ -883,8 +959,15 @@ namespace CustomRPC
 
             UpdateMatchOrderDelayControls();
 
-            foreach (var button in new[] { buttonAddSlot, buttonDuplicateSlot, buttonRemoveSlot, buttonToggleEnabled, buttonConnectAll, buttonDisconnectAll, buttonUpdateAll })
+            foreach (var button in new[]
+            {
+                buttonAddSlot, buttonDuplicateSlot, buttonRemoveSlot, buttonToggleEnabled,
+                buttonConnect, buttonDisconnect, buttonUpdatePresence,
+                buttonConnectAll, buttonDisconnectAll, buttonUpdateAll,
+            })
+            {
                 ThemeActionButton(button);
+            }
         }
 
         void ThemeActionButton(WinButton button)
@@ -892,21 +975,25 @@ namespace CustomRPC
             if (button == null)
                 return;
 
-            button.ForeColor = CurrentColors.TextColor;
-            button.FlatStyle = settings.darkMode ? FlatStyle.Flat : FlatStyle.Standard;
-            button.UseVisualStyleBackColor = true;
-
             if (settings.darkMode)
             {
+                button.FlatStyle = FlatStyle.Flat;
+                button.ForeColor = CurrentColors.TextColor;
                 button.BackColor = CurrentColors.BgButton;
+                button.UseVisualStyleBackColor = false;
                 button.FlatAppearance.BorderSize = 0;
                 button.FlatAppearance.MouseOverBackColor = CurrentColors.BgButtonMouseOver;
                 button.FlatAppearance.MouseDownBackColor = CurrentColors.BgButtonMouseDown;
             }
             else
             {
-                button.BackColor = CurrentColors.BgButton;
+                button.FlatStyle = FlatStyle.Standard;
+                button.BackColor = SystemColors.Control;
+                button.ForeColor = SystemColors.ControlText;
+                button.UseVisualStyleBackColor = true;
             }
+
+            button.Invalidate();
         }
 
         WinButton CreateActionButton(string text, EventHandler handler)
@@ -953,7 +1040,7 @@ namespace CustomRPC
             errorMessage = null;
             var enabledSlots = slotService.Slots.Where(s => s.Enabled).ToList();
 
-            var duplicateIds = slotService.Slots
+            var duplicateIds = enabledSlots
                 .Select(s => NormalizeApplicationId(s.ApplicationId))
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .GroupBy(id => id)
@@ -1003,6 +1090,7 @@ namespace CustomRPC
             {
                 bool duplicateId = slotService.Slots.Any(s =>
                     s.SlotId != slot.SlotId &&
+                    s.Enabled &&
                     NormalizeApplicationId(s.ApplicationId) == appId);
                 if (duplicateId)
                 {
@@ -1041,11 +1129,12 @@ namespace CustomRPC
 
             return slotService.Slots.Any(s =>
                 s.SlotId != slot.SlotId &&
+                s.Enabled &&
                 NormalizeApplicationId(s.ApplicationId) == appId);
         }
 
         void ShowSlotConstraintMessage(string message) =>
-            MessageBox.Show(this, message, Strings.information, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            QuietMessageBox.Show(this, message, Strings.information, MessageBoxButtons.OK, MessageBoxIcon.Information);
 
         void ShiftControlsDown(int offset)
         {
@@ -1062,6 +1151,43 @@ namespace CustomRPC
 
         PresenceSlot GetSelectedSlot() =>
             string.IsNullOrEmpty(selectedSlotId) ? null : slotService.GetSlot(selectedSlotId);
+
+        List<PresenceSlot> GetSelectedSlotsInChartOrder()
+        {
+            var result = new List<PresenceSlot>();
+            if (listViewSlots == null)
+                return result;
+
+            foreach (ListViewItem item in listViewSlots.SelectedItems.Cast<ListViewItem>().OrderBy(i => i.Index))
+            {
+                var slot = slotService.GetSlot((string)item.Tag);
+                if (slot != null)
+                    result.Add(slot);
+            }
+
+            return result;
+        }
+
+        bool TryAssignEnabledForNewSlot(PresenceSlot slot, bool wantEnabled)
+        {
+            if (slot == null)
+                return false;
+
+            if (!wantEnabled)
+            {
+                slot.Enabled = false;
+                return true;
+            }
+
+            if (slotService.Slots.Count(s => s.Enabled) >= MaxEnabledActivities)
+            {
+                slot.Enabled = false;
+                return false;
+            }
+
+            slot.Enabled = true;
+            return true;
+        }
 
         void RefreshSlotListView()
         {
@@ -1092,6 +1218,7 @@ namespace CustomRPC
             RestoreListViewScroll(topIndex);
             UpdateSlotActionButtons();
             listViewSlots.Invalidate(true);
+            SyncActivitiesListScrollbar();
         }
 
         void UpdateListItemForSlot(PresenceSlot slot, bool keepEditorFocus = false)
@@ -1122,6 +1249,7 @@ namespace CustomRPC
             {
                 listViewSlots.EndUpdate();
                 listViewSlots.Invalidate(true);
+                SyncActivitiesListScrollbar();
             }
         }
 
@@ -1194,6 +1322,9 @@ namespace CustomRPC
 
             UpdateListItemForSlot(slot);
             UpdateGlobalConnectionUi();
+            SyncAlternatingPresetsTimer();
+            if (IsCyclingEditLocked())
+                UpdateCyclingStatusBanner();
 
             if (slot.SlotId == selectedSlotId)
                 UpdateSelectedSlotIdFieldColor(slot);
@@ -1219,20 +1350,33 @@ namespace CustomRPC
             bool anyConnected = slotService.Slots.Any(s => s.IsConnected);
             bool anyConnecting = slotService.Slots.Any(s => s.ConnectionState == SlotConnectionState.Connecting ||
                 s.ConnectionState == SlotConnectionState.UpdatingPresence);
+            bool anyDelaying = slotService.Slots.Any(s => slotService.IsMatchOrderDelaying(s));
 
             bool multiSlotMode = IsMultiSlotRpcMode();
 
             if (buttonConnectAll != null)
-                buttonConnectAll.Enabled = multiSlotMode && anyConnectable;
+                buttonConnectAll.Enabled = multiSlotMode && anyConnectable && !cycleAutoconnectInProgress;
             if (buttonDisconnectAll != null)
-                buttonDisconnectAll.Enabled = multiSlotMode && (anyConnected || anyConnecting);
+                buttonDisconnectAll.Enabled = multiSlotMode && (anyConnected || anyConnecting || anyDelaying);
             if (buttonUpdateAll != null)
                 buttonUpdateAll.Enabled = multiSlotMode && anyConnected;
 
             textBoxID.ReadOnly = selectedConnected || selectedBusy;
 
-            trayMenuDisconnect.Enabled = slotService.Slots.Any(s => s.IsConnected || s.ConnectionState == SlotConnectionState.Connecting ||
-                s.ConnectionState == SlotConnectionState.UpdatingPresence);
+            SyncTrayMenuForRpcMode();
+            bool anyActivePresence = anyConnected || anyConnecting || anyDelaying;
+            if (IsMultiSlotRpcMode())
+            {
+                trayMenuDisconnect.Enabled = anyActivePresence;
+                trayMenuReconnect.Enabled = !cycleAutoconnectInProgress &&
+                    (anyConnectable || anyActivePresence);
+            }
+            else
+            {
+                // Legacy tray: disconnect whatever is live, not only the selected row.
+                trayMenuDisconnect.Enabled = anyActivePresence;
+                trayMenuReconnect.Enabled = slotService.Slots.Any(s => !string.IsNullOrWhiteSpace(s.ApplicationId));
+            }
 
             if (slot != null)
                 UpdateSelectedSlotIdFieldColor(slot);
@@ -1259,7 +1403,7 @@ namespace CustomRPC
                 ConnectionManager.State = ConnectionState.Connecting;
                 toolStripStatusLabelStatus.Text = Strings.statusConnecting;
             }
-            else if (anyError)
+            else             if (anyError)
             {
                 ConnectionManager.State = ConnectionState.Error;
                 toolStripStatusLabelStatus.Text = Strings.statusError;
@@ -1271,10 +1415,31 @@ namespace CustomRPC
                 toolStripStatusLabelUsername.Text = "";
                 trayIcon.Text = $"{res.GetString("trayIcon.Text")}{(Program.IsSecondInstance ? " (2)" : "")}";
             }
+
+            if (IsCyclingEditLocked())
+            {
+                buttonConnect.Enabled = false;
+                buttonDisconnect.Enabled = false;
+                buttonUpdatePresence.Enabled = false;
+                // While Cycle Presets is on, Connect All remains available to start the timer,
+                // and Disconnect All remains available to cancel the session.
+                if (buttonUpdateAll != null)
+                    buttonUpdateAll.Enabled = false;
+            }
         }
 
         void UpdateSelectedSlotIdFieldColor(PresenceSlot slot)
         {
+            if (slot == null || textBoxID == null)
+                return;
+
+            // While Cycle Presets is on, keep the ID field neutral (no green/red/duplicate flash).
+            if (IsCyclingEditLocked())
+            {
+                textBoxID.BackColor = CurrentColors.BgTextFields;
+                return;
+            }
+
             if (IsMultiSlotRpcMode() && SlotHasDuplicateApplicationId(slot))
             {
                 textBoxID.BackColor = CurrentColors.BgTextFieldsDuplicateId;
@@ -1295,16 +1460,54 @@ namespace CustomRPC
             }
         }
 
+        void SyncActivitiesListScrollbar()
+        {
+            if (listViewSlots == null)
+                return;
+
+            // Keep the chart scrollbar present during cycling in Multi-RP only (not Legacy).
+            WinApi.SetListViewVerticalScrollbarForced(
+                listViewSlots,
+                IsCyclingEditLocked() && IsMultiSlotRpcMode());
+
+            // Legacy Status column fills remaining client width (shrinks when scrollbar appears).
+            if (!IsMultiSlotRpcMode())
+                SyncActivitiesListColumns();
+        }
+
+        void ListViewSlots_MouseWheelKeepScrollbar(object sender, MouseEventArgs e)
+        {
+            if (!IsCyclingEditLocked() || !IsMultiSlotRpcMode())
+                return;
+
+            BeginInvoke(new MethodInvoker(SyncActivitiesListScrollbar));
+        }
+
+        void ListViewSlots_PaintKeepScrollbar(object sender, PaintEventArgs e)
+        {
+            if (!IsCyclingEditLocked() || !IsMultiSlotRpcMode() ||
+                listViewSlots == null || !listViewSlots.IsHandleCreated)
+                return;
+
+            WinApi.SetListViewVerticalScrollbarForced(listViewSlots, true);
+        }
+
         void UpdateSlotActionButtons()
         {
-            bool hasSelection = GetSelectedSlot() != null;
+            if (buttonAddSlot == null || buttonDuplicateSlot == null || buttonRemoveSlot == null)
+                return;
+
+            bool locked = IsCyclingEditLocked();
+            bool hasSelection = GetSelectedSlotsInChartOrder().Count > 0 || GetSelectedSlot() != null;
             bool multiSlotMode = IsMultiSlotRpcMode();
-            buttonAddSlot.Enabled = true;
-            buttonDuplicateSlot.Enabled = hasSelection;
-            buttonRemoveSlot.Enabled = hasSelection;
+            buttonAddSlot.Enabled = !locked;
+            buttonDuplicateSlot.Enabled = !locked && hasSelection;
+            buttonRemoveSlot.Enabled = !locked && hasSelection;
             if (buttonToggleEnabled != null)
                 buttonToggleEnabled.Visible = multiSlotMode;
             UpdateToggleEnabledButtonText();
+            if (locked && buttonToggleEnabled != null)
+                buttonToggleEnabled.Enabled = false;
         }
 
         void UpdateToggleEnabledButtonText()
@@ -1312,9 +1515,9 @@ namespace CustomRPC
             if (buttonToggleEnabled == null)
                 return;
 
-            var slot = GetSelectedSlot();
-            buttonToggleEnabled.Enabled = slot != null;
-            buttonToggleEnabled.Text = slot != null && !slot.Enabled ? "Enable" : "Disable";
+            var selected = GetSelectedSlotsInChartOrder();
+            buttonToggleEnabled.Enabled = selected.Count > 0;
+            buttonToggleEnabled.Text = selected.Any(s => !s.Enabled) ? "Enable" : "Disable";
         }
 
         bool ShouldMatchDiscordListOrder() =>
@@ -1351,7 +1554,7 @@ namespace CustomRPC
 
         void MatchOrderText_MouseEnter(object sender, EventArgs e)
         {
-            if (!IsMultiSlotRpcMode() || labelMatchOrderText == null)
+            if (IsCyclingEditLocked() || !IsMultiSlotRpcMode() || labelMatchOrderText == null)
                 return;
 
             matchOrderHoverPopup.CancelHide();
@@ -1365,9 +1568,25 @@ namespace CustomRPC
         void MatchOrderText_MouseLeave(object sender, EventArgs e) =>
             matchOrderHoverPopup?.ScheduleHide();
 
+        void MatchOrderDelay_MouseEnter(object sender, EventArgs e)
+        {
+            if (IsCyclingEditLocked() || !IsMultiSlotRpcMode() || labelMatchOrderDelay == null)
+                return;
+
+            matchOrderDelayHoverPopup.CancelHide();
+            matchOrderDelayHoverPopup.ShowLines(
+                ActivitiesInfoContent.GetMatchOrderDelayLines(),
+                labelMatchOrderDelay.PointToScreen(new Point(0, labelMatchOrderDelay.Height)),
+                RectangleToScreen(ClientRectangle),
+                new Padding(10, 4, 10, 8));
+        }
+
+        void MatchOrderDelay_MouseLeave(object sender, EventArgs e) =>
+            matchOrderDelayHoverPopup?.ScheduleHide();
+
         void MatchOrderText_Click(object sender, EventArgs e)
         {
-            if (checkBoxMatchDiscordListOrder == null || !checkBoxMatchDiscordListOrder.Enabled)
+            if (IsCyclingEditLocked() || checkBoxMatchDiscordListOrder == null || !checkBoxMatchDiscordListOrder.Enabled)
                 return;
 
             checkBoxMatchDiscordListOrder.Checked = !checkBoxMatchDiscordListOrder.Checked;
@@ -1410,12 +1629,7 @@ namespace CustomRPC
 
             if (!available)
             {
-                if (settings.matchDiscordListOrder)
-                {
-                    settings.matchDiscordListOrder = false;
-                    Utils.SaveSettings();
-                }
-
+                // Hide Match Order in Legacy without clearing the saved Multi-RP preference.
                 syncingMatchListOrderToggle = true;
                 try
                 {
@@ -1426,9 +1640,12 @@ namespace CustomRPC
                     syncingMatchListOrderToggle = false;
                 }
 
+                checkBoxMatchDiscordListOrder.Enabled = false;
                 UpdateMatchOrderDelayControls();
                 return;
             }
+
+            checkBoxMatchDiscordListOrder.Enabled = !IsCyclingEditLocked();
 
             syncingMatchListOrderToggle = true;
             try
@@ -1459,9 +1676,12 @@ namespace CustomRPC
             if (labelMatchOrderDelay == null || numericUpDownMatchOrderDelay == null)
                 return;
 
-            bool enabled = IsMultiSlotRpcMode() && checkBoxMatchDiscordListOrder.Checked;
+            bool locked = IsCyclingEditLocked();
+            bool enabled = !locked && IsMultiSlotRpcMode() && checkBoxMatchDiscordListOrder.Checked;
             numericUpDownMatchOrderDelay.Enabled = enabled;
 
+            // Always leave the Delay label enabled so ForeColor sticks; tooltips/clicks are gated separately.
+            labelMatchOrderDelay.Enabled = true;
             Color delayColor = enabled ? CurrentColors.TextColor : CurrentColors.TextInactive;
             labelMatchOrderDelay.ForeColor = delayColor;
             numericUpDownMatchOrderDelay.ForeColor = delayColor;
@@ -1476,6 +1696,14 @@ namespace CustomRPC
             settings.matchDiscordListOrder = checkBoxMatchDiscordListOrder.Checked;
             Utils.SaveSettings();
             UpdateMatchOrderDelayControls();
+
+            // Turning Match Order off mid-sequence: drop the delay queue and proceed normally.
+            if (!checkBoxMatchDiscordListOrder.Checked && slotService != null)
+            {
+                slotService.CancelMatchOrderDelayAndProceed();
+                RefreshSlotListView();
+                UpdateGlobalConnectionUi();
+            }
         }
 
         void NumericUpDownMatchOrderDelay_ValueChanged(object sender, EventArgs e)
@@ -1489,25 +1717,46 @@ namespace CustomRPC
 
         void SlotToggleEnabled_Click(object sender, EventArgs e)
         {
-            var slot = GetSelectedSlot();
-            if (slot == null)
+            if (IsCyclingEditLocked())
                 return;
 
-            if (!slot.Enabled)
+            var targets = GetSelectedSlotsInChartOrder();
+            if (targets.Count == 0)
+                return;
+
+            bool enabling = targets.Any(s => !s.Enabled);
+            if (enabling)
             {
                 int enabledCount = slotService.Slots.Count(s => s.Enabled);
-                if (enabledCount >= MaxEnabledActivities)
+                bool hitLimit = false;
+                foreach (var slot in targets.Where(s => !s.Enabled))
                 {
+                    if (enabledCount >= MaxEnabledActivities)
+                    {
+                        hitLimit = true;
+                        break;
+                    }
+
+                    slot.Enabled = true;
+                    enabledCount++;
+                    UpdateListItemForSlot(slot);
+                }
+
+                if (hitLimit)
                     ShowSlotConstraintMessage(ActivitiesUiText.MaxEnabledActivities);
-                    return;
+            }
+            else
+            {
+                foreach (var slot in targets)
+                {
+                    slot.Enabled = false;
+                    UpdateListItemForSlot(slot);
                 }
             }
 
-            slot.Enabled = !slot.Enabled;
-            UpdateListItemForSlot(slot);
             UpdateToggleEnabledButtonText();
             UpdateGlobalConnectionUi();
-            SlotStorage.Save(CreateSlotConfig());
+            SaveSlotsToStorage();
         }
 
         void SlotListSelectionChanged(object sender, EventArgs e)
@@ -1516,18 +1765,35 @@ namespace CustomRPC
                 return;
 
             if (listViewSlots.SelectedItems.Count == 0)
+            {
+                UpdateToggleEnabledButtonText();
+                UpdateSlotActionButtons();
+                listViewSlots.Invalidate(true);
                 return;
+            }
 
-            var newSlotId = (string)listViewSlots.SelectedItems[0].Tag;
-            if (newSlotId == selectedSlotId)
-                return;
+            string newSlotId;
+            if (listViewSlots.FocusedItem != null && listViewSlots.FocusedItem.Selected)
+                newSlotId = (string)listViewSlots.FocusedItem.Tag;
+            else if (!string.IsNullOrEmpty(selectedSlotId) &&
+                     listViewSlots.SelectedItems.Cast<ListViewItem>().Any(i => (string)i.Tag == selectedSlotId))
+                newSlotId = selectedSlotId;
+            else
+                newSlotId = (string)listViewSlots.SelectedItems[listViewSlots.SelectedItems.Count - 1].Tag;
 
-            SaveEditorToSelectedSlot(refreshList: false);
-            selectedSlotId = newSlotId;
-            LoadSelectedSlotToEditor();
-            UpdateListItemForSlot(GetSelectedSlot());
-            UpdateGlobalConnectionUi();
-            SlotStorage.Save(CreateSlotConfig());
+            if (newSlotId != selectedSlotId)
+            {
+                SaveEditorToSelectedSlot(refreshList: false);
+                selectedSlotId = newSlotId;
+                LoadSelectedSlotToEditor();
+                UpdateListItemForSlot(GetSelectedSlot());
+                UpdateGlobalConnectionUi();
+                SaveSlotsToStorage();
+            }
+
+            UpdateToggleEnabledButtonText();
+            UpdateSlotActionButtons();
+            listViewSlots?.Invalidate(true);
         }
 
         void LoadSelectedSlotToEditor()
@@ -1622,6 +1888,15 @@ namespace CustomRPC
 
         void SaveEditorToSelectedSlot(bool refreshList = true)
         {
+            // While Cycle Presets is on, the editor is locked — never write it back into slots.
+            if (IsCyclingEditLocked())
+                return;
+
+            FlushEditorToSelectedSlot(refreshList);
+        }
+
+        void FlushEditorToSelectedSlot(bool refreshList = true)
+        {
             var slot = GetSelectedSlot();
             if (slot == null || loading)
                 return;
@@ -1644,8 +1919,11 @@ namespace CustomRPC
             slot.Button1Url = textBoxButton1URL.Text;
             slot.Button2Text = textBoxButton2Text.Text;
             slot.Button2Url = textBoxButton2URL.Text;
-            slot.Type = (int)(ActivityType)comboBoxType.SelectedValue;
-            slot.Display = (int)(StatusDisplayType)comboBoxDisplay.SelectedValue;
+
+            if (comboBoxType.SelectedValue is ActivityType activityType)
+                slot.Type = (int)activityType;
+            if (comboBoxDisplay.SelectedValue is StatusDisplayType displayType)
+                slot.Display = (int)displayType;
 
             foreach (RadioButton btn in new[] { radioButtonLastConnection, radioButtonStartTime, radioButtonPresence, radioButtonLocalTime, radioButtonCustom })
             {
@@ -1681,19 +1959,11 @@ namespace CustomRPC
                 textBoxButton2URL.MaxLength);
         }
 
-        void SaveSlotsToStorage()
-        {
-            if (loading)
-            {
-                SlotStorage.Save(CreateSlotConfig());
-                return;
-            }
-
-            CommitEditorToSelectedSlot(persistToDisk: true);
-        }
-
         void SlotAdd_Click(object sender, EventArgs e)
         {
+            if (IsCyclingEditLocked())
+                return;
+
             SaveEditorToSelectedSlot(refreshList: false);
             var nextType = GetNextAvailableActivityType() ?? ActivityType.Playing;
 
@@ -1703,6 +1973,7 @@ namespace CustomRPC
             slot.Label = $"Activity {index}";
             slot.Name = "";
             slot.ApplicationId = "";
+            TryAssignEnabledForNewSlot(slot, wantEnabled: true);
             slotService.Slots.Add(slot);
             selectedSlotId = slot.SlotId;
             LoadSelectedSlotToEditor();
@@ -1712,14 +1983,24 @@ namespace CustomRPC
 
         void SlotDuplicate_Click(object sender, EventArgs e)
         {
-            var source = GetSelectedSlot();
-            if (source == null)
+            if (IsCyclingEditLocked())
+                return;
+
+            var sources = GetSelectedSlotsInChartOrder();
+            if (sources.Count == 0)
                 return;
 
             SaveEditorToSelectedSlot();
-            var copy = source.Clone($"{source.Label} copy");
-            slotService.Slots.Add(copy);
-            selectedSlotId = copy.SlotId;
+            PresenceSlot lastCopy = null;
+            foreach (var source in sources)
+            {
+                var copy = source.Clone($"{source.Label} copy");
+                TryAssignEnabledForNewSlot(copy, source.Enabled);
+                slotService.Slots.Add(copy);
+                lastCopy = copy;
+            }
+
+            selectedSlotId = lastCopy?.SlotId;
             LoadSelectedSlotToEditor();
             RefreshSlotListView();
             SaveSlotsToStorage();
@@ -1727,16 +2008,39 @@ namespace CustomRPC
 
         void SlotRemove_Click(object sender, EventArgs e)
         {
-            var slot = GetSelectedSlot();
-            if (slot == null)
+            if (IsCyclingEditLocked())
                 return;
 
-            if (MessageBox.Show(this, $"Remove activity \"{slot.Label}\"?", Application.ProductName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            var targets = GetSelectedSlotsInChartOrder();
+            if (targets.Count == 0)
                 return;
 
-            slotService.DisconnectSlot(slot);
-            slotService.Slots.Remove(slot);
-            selectedSlotId = slotService.Slots.Count > 0 ? slotService.Slots[0].SlotId : null;
+            string confirm = targets.Count == 1
+                ? $"Remove activity \"{targets[0].Label}\"?"
+                : $"Remove {targets.Count} selected activities?";
+            if (QuietMessageBox.Show(this, confirm, Application.ProductName, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+
+            int firstIndex = targets
+                .Select(t => slotService.Slots.IndexOf(t))
+                .Where(i => i >= 0)
+                .DefaultIfEmpty(0)
+                .Min();
+
+            foreach (var slot in targets)
+            {
+                slotService.DisconnectSlot(slot);
+                slotService.Slots.Remove(slot);
+            }
+
+            if (slotService.Slots.Count == 0)
+                selectedSlotId = null;
+            else
+            {
+                int nextIndex = Math.Min(firstIndex, slotService.Slots.Count - 1);
+                selectedSlotId = slotService.Slots[nextIndex].SlotId;
+            }
+
             LoadSelectedSlotToEditor();
             RefreshSlotListView();
             UpdateSlotActionButtons();
@@ -1748,7 +2052,7 @@ namespace CustomRPC
             if (IsMultiSlotRpcMode())
             {
                 if (TryValidateEnabledSlotsForConnect(out _))
-                    _ = slotService.ConnectAllEnabledSlotsAsync(ShouldMatchDiscordListOrder(), GetMatchListOrderDelayMs());
+                    _ = slotService.ConnectAllEnabledSlotsAsync(ShouldMatchDiscordListOrder(), GetMatchListOrderDelayMs);
                 return;
             }
 
@@ -1824,6 +2128,152 @@ namespace CustomRPC
             UpdateGlobalConnectionUi();
         }
 
+        void SyncTrayMenuForRpcMode()
+        {
+            if (trayMenuDisconnect == null || trayMenuReconnect == null)
+                return;
+
+            if (IsMultiSlotRpcMode())
+            {
+                trayMenuDisconnect.Text = "Disconnect All";
+                trayMenuReconnect.Text = "Reconnect All";
+            }
+            else
+            {
+                trayMenuDisconnect.Text = "Disconnect";
+                trayMenuReconnect.Text = "Reconnect";
+            }
+        }
+
+        PresenceSlot GetLegacyTrayConnectionTarget()
+        {
+            if (slotService == null)
+                return null;
+
+            if (!string.IsNullOrEmpty(legacyTrayLastConnectedSlotId))
+            {
+                var remembered = slotService.GetSlot(legacyTrayLastConnectedSlotId);
+                if (remembered != null && !string.IsNullOrWhiteSpace(remembered.ApplicationId))
+                    return remembered;
+            }
+
+            return slotService.Slots.FirstOrDefault(s =>
+                    s.IsConnected ||
+                    s.ConnectionState == SlotConnectionState.Connecting ||
+                    s.ConnectionState == SlotConnectionState.UpdatingPresence) ??
+                slotService.Slots.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s.ApplicationId));
+        }
+
+        void NoteTrayCancelledCyclePresets()
+        {
+            if (IsCyclingEditLocked())
+                trayReconnectShouldRestoreCycle = true;
+        }
+
+        void TryRestoreCyclePresetsAfterTrayReconnect()
+        {
+            if (!trayReconnectShouldRestoreCycle)
+                return;
+
+            trayReconnectShouldRestoreCycle = false;
+
+            if (checkBoxAlternatingEnabled == null || checkBoxAlternatingEnabled.Checked)
+                return;
+
+            if (string.IsNullOrWhiteSpace(settings?.alternatingPresetsFolder) ||
+                !Directory.Exists(settings.alternatingPresetsFolder))
+                return;
+
+            checkBoxAlternatingEnabled.Checked = true;
+        }
+
+        void TrayMenuDisconnect_Click(object sender, EventArgs e)
+        {
+            if (IsMultiSlotRpcMode())
+            {
+                NoteTrayCancelledCyclePresets();
+                SlotDisconnectAll_Click(sender, e);
+                return;
+            }
+
+            // Remember the live slot before cycle cancel / disconnect so Reconnect can restore it.
+            var liveTarget = slotService?.Slots.FirstOrDefault(s =>
+                s.IsConnected ||
+                s.ConnectionState == SlotConnectionState.Connecting ||
+                s.ConnectionState == SlotConnectionState.UpdatingPresence);
+
+            NoteTrayCancelledCyclePresets();
+            if (IsCyclingEditLocked())
+                CancelCyclePresetsSession(restoreBaseline: true);
+
+            if (liveTarget != null)
+                legacyTrayLastConnectedSlotId = liveTarget.SlotId;
+
+            var target = !string.IsNullOrEmpty(legacyTrayLastConnectedSlotId)
+                ? slotService?.GetSlot(legacyTrayLastConnectedSlotId)
+                : null;
+            if (target != null)
+                DisconnectSlot(target);
+
+            localTimeTimer.Stop();
+            UpdateGlobalConnectionUi();
+            Analytics.TrackEvent("Disconnected (tray legacy)");
+        }
+
+        async void TrayMenuReconnect_Click(object sender, EventArgs e)
+        {
+            if (IsMultiSlotRpcMode())
+            {
+                if (cycleAutoconnectInProgress)
+                    return;
+
+                NoteTrayCancelledCyclePresets();
+                if (IsCyclingEditLocked())
+                    CancelCyclePresetsSession(restoreBaseline: true);
+
+                PerformDisconnectAllLikeButton();
+                if (!TryValidateEnabledSlotsForConnect(out _))
+                {
+                    UpdateGlobalConnectionUi();
+                    TryRestoreCyclePresetsAfterTrayReconnect();
+                    return;
+                }
+
+                await PerformConnectAllLikeButtonAsync();
+                TryRestoreCyclePresetsAfterTrayReconnect();
+                Analytics.TrackEvent("Reconnected all slots (tray)");
+                return;
+            }
+
+            NoteTrayCancelledCyclePresets();
+            if (IsCyclingEditLocked())
+                CancelCyclePresetsSession(restoreBaseline: true);
+
+            var target = GetLegacyTrayConnectionTarget();
+            if (target == null)
+            {
+                TryRestoreCyclePresetsAfterTrayReconnect();
+                return;
+            }
+
+            selectedSlotId = target.SlotId;
+            LoadSelectedSlotToEditor();
+            SaveEditorToSelectedSlot();
+            SaveSlotsToStorage();
+
+            if (!TryValidateSlotForConnect(target, out _))
+            {
+                UpdateGlobalConnectionUi();
+                TryRestoreCyclePresetsAfterTrayReconnect();
+                return;
+            }
+
+            slotService.ReconnectSlot(target);
+            UpdateGlobalConnectionUi();
+            TryRestoreCyclePresetsAfterTrayReconnect();
+            Analytics.TrackEvent("Reconnected (tray legacy)");
+        }
+
         async Task PerformConnectAllLikeButtonAsync()
         {
             SaveEditorToSelectedSlot();
@@ -1835,12 +2285,12 @@ namespace CustomRPC
                 return;
             }
 
-            await slotService.ConnectAllEnabledSlotsAsync(ShouldMatchDiscordListOrder(), GetMatchListOrderDelayMs());
+            await slotService.ConnectAllEnabledSlotsAsync(ShouldMatchDiscordListOrder(), GetMatchListOrderDelayMs);
         }
 
         async void SlotConnectAll_Click(object sender, EventArgs e)
         {
-            if (!IsMultiSlotRpcMode())
+            if (!IsMultiSlotRpcMode() || cycleAutoconnectInProgress)
                 return;
 
             await PerformConnectAllLikeButtonAsync();
@@ -1852,20 +2302,29 @@ namespace CustomRPC
             if (!IsMultiSlotRpcMode())
                 return;
 
+            if (IsCyclingEditLocked())
+            {
+                // Cancel the cycle session (restores pre-cycle chart), then disconnect everything.
+                CancelCyclePresetsSession(restoreBaseline: true);
+                PerformDisconnectAllLikeButton();
+                Analytics.TrackEvent("Disconnected all slots (cancelled cycle)");
+                return;
+            }
+
             PerformDisconnectAllLikeButton();
             Analytics.TrackEvent("Disconnected all slots");
         }
 
         async void SlotUpdateAll_Click(object sender, EventArgs e)
         {
-            if (!IsMultiSlotRpcMode())
+            if (IsCyclingEditLocked() || !IsMultiSlotRpcMode())
                 return;
 
             SaveEditorToSelectedSlot();
             SaveSlotsToStorage();
             await slotService.UpdateAllEnabledSlotsAsync(
                 matchListOrder: ShouldMatchDiscordListOrder(),
-                listeningWatchingDelayMs: GetMatchListOrderDelayMs());
+                getListeningWatchingDelayMs: GetMatchListOrderDelayMs);
         }
 
         bool InitSlot(PresenceSlot slot) => slotService.InitSlot(slot);
@@ -1900,7 +2359,15 @@ namespace CustomRPC
 
             if (addAsNewSlot)
             {
-                var slot = PresenceSlot.FromPreset(preset, (int)settings.pipe);
+                int nextIndex = slotService.Slots.Count + 1;
+                string label = string.IsNullOrWhiteSpace(preset.Name)
+                    ? $"Activity {nextIndex}"
+                    : preset.Name;
+
+                var slot = PresenceSlot.FromPreset(preset, (int)settings.pipe, label);
+                bool wantEnabled = !preset.EnabledSpecified || preset.Enabled;
+                TryAssignEnabledForNewSlot(slot, wantEnabled);
+
                 slotService.Slots.Add(slot);
                 selectedSlotId = slot.SlotId;
             }
@@ -1921,6 +2388,30 @@ namespace CustomRPC
 
             LoadSelectedSlotToEditor();
             RefreshSlotListView();
+            RestoreListSelection(keepEditorFocus: true, ensureVisible: true);
+            UpdateSlotActionButtons();
+            SaveSlotsToStorage();
+        }
+
+        void ReplaceChartWithCrpPreset(Preset preset)
+        {
+            SaveEditorToSelectedSlot(refreshList: false);
+            DisconnectAllSlots();
+            slotService.Slots.Clear();
+
+            var slot = PresenceSlot.FromPreset(preset, (int)settings.pipe);
+            bool wantEnabled = !preset.EnabledSpecified || preset.Enabled;
+            TryAssignEnabledForNewSlot(slot, wantEnabled);
+            if (string.IsNullOrWhiteSpace(slot.Label))
+                slot.Label = string.IsNullOrWhiteSpace(slot.Name) ? "Activity 1" : slot.Name;
+
+            slotService.Slots.Add(slot);
+            selectedSlotId = slot.SlotId;
+            LoadSelectedSlotToEditor();
+            RefreshSlotListView();
+            RestoreListSelection(keepEditorFocus: true, ensureVisible: true);
+            UpdateSlotActionButtons();
+            UpdateGlobalConnectionUi();
             SaveSlotsToStorage();
         }
 
@@ -1981,6 +2472,18 @@ namespace CustomRPC
                     ? slotService.Slots[0].SlotId
                     : slotService.GetSlot(preset.SelectedSlotId)?.SlotId ?? slotService.Slots[0].SlotId;
 
+                if (preset.MatchDiscordListOrder.HasValue)
+                    settings.matchDiscordListOrder = preset.MatchDiscordListOrder.Value;
+
+                if (preset.MatchListOrderDelaySeconds.HasValue)
+                {
+                    decimal delay = Math.Max(1, Math.Min(300, preset.MatchListOrderDelaySeconds.Value));
+                    settings.matchListOrderDelaySeconds = delay;
+                }
+
+                SyncMatchListOrderToggle();
+                Utils.SaveSettings();
+
                 LoadSelectedSlotToEditor();
                 RefreshSlotListView();
                 UpdateSlotActionButtons();
@@ -1993,13 +2496,25 @@ namespace CustomRPC
             }
         }
 
-        void SaveMultiSlotPreset(string filePath)
+        void SaveMultiSlotPreset(string filePath, IList<PresenceSlot> slotsToSave = null)
         {
             SaveEditorToSelectedSlot();
+
+            var slots = slotsToSave != null && slotsToSave.Count > 0
+                ? slotsToSave
+                : (IList<PresenceSlot>)slotService.Slots;
+
+            string selectedId = selectedSlotId;
+            if (slotsToSave != null && slotsToSave.Count > 0 &&
+                (string.IsNullOrEmpty(selectedId) || !slots.Any(s => s.SlotId == selectedId)))
+                selectedId = slots[0].SlotId;
+
             var preset = new MultiSlotPreset
             {
-                SelectedSlotId = selectedSlotId,
-                Slots = slotService.Slots.Select(SlotStorage.ToStored).ToArray(),
+                SelectedSlotId = selectedId,
+                MatchDiscordListOrder = settings.matchDiscordListOrder,
+                MatchListOrderDelaySeconds = Math.Max(1, Math.Min(300, settings.matchListOrderDelaySeconds)),
+                Slots = slots.Select(SlotStorage.ToStored).ToArray(),
             };
 
             File.WriteAllText(filePath, new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize(preset));
