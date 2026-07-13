@@ -1,71 +1,57 @@
-<p align=center>
-  <a href="https://github.com/maximmax42/Discord-CustomRP/releases/latest"><img alt="GitHub release (latest by date)" src="https://img.shields.io/github/v/tag/maximmax42/Discord-CustomRP?color=19e2e2&label=latest&logo=github"></a>
-  <a href="https://github.com/maximmax42/Discord-CustomRP/releases/latest"><img alt="GitHub Releases" src="https://img.shields.io/github/downloads/maximmax42/Discord-CustomRP/latest/total?color=19e2e2&label=downloads&logo=github"></a>
-  <a href="https://github.com/maximmax42/Discord-CustomRP/releases"><img alt="All GitHub Releases" src="https://img.shields.io/github/downloads/maximmax42/Discord-CustomRP/total?color=19e2e2&label=total%20downloads&logo=github"></a>
-  <br>
-  <a href="https://boosty.to/maximmax42"><img alt="Support on Boosty" src="https://img.shields.io/badge/support%20on-boosty-19e2e2"></a>
-  <a href="https://www.customrp.xyz/discordserver"><img alt="Discord Server" src="https://img.shields.io/discord/928333025652121630?color=19e2e2&label=server&logo=discord&logoColor=white"></a>
-  <br>
-  <a href="https://ci.appveyor.com/project/maximmax42/customrp"><img alt="Build status" src="https://ci.appveyor.com/api/projects/status/gon87e7t4hgblh9o?svg=true"></a>
-</p>
+**Custom Discord Rich Presence Manager for Windows 7+**
 
-# <img src=https://www.customrp.xyz/assets/logo.png style="height:1em;"/> Custom Discord Rich Presence Manager
-![App Screenshot](https://www.customrp.xyz/assets/screenshot.png)
+| Preview | Demo |
+|:--------:|:----:|
+| <img src="https://github.com/user-attachments/assets/3aa43cd2-adf4-4ca7-ab85-e4a8d5eb45b1" height="650"> | <img src="https://github.com/user-attachments/assets/197cbaab-ac3c-4ef8-ab51-ba9cb9060b3a" height="650"> |
 
-Custom Discord Rich Presence Manager for Windows 7+. Some of its features are run on startup and tray minimization. Uses [Lachee's DiscordRPC for C#](https://github.com/Lachee/discord-rpc-csharp).
+# Fork: Multi-CustomRP *(Better-CustomRP)*
 
-## Supporters
+**Many large to small improvements and new features to CustomRP**
 
-* [umamidayo](https://www.roblox.com/users/6757996/profile) - $152.67 (15000.00 RUB)
-* Crohnus1965 - $75.00 (5922.75 RUB)
-* kiwi - $50.69 (50.00 EUR)
-* [dragon GRaf](https://github.com/dragongrafdiscord/mycustomrichpresence) - $45.00 (1949.00 RUB + 15.00 USDT)
-* [Grim](https://www.savethekiwi.nz/) - $25.00 (0.0008328 BTC)
-* Js9 - $24.05 (2405.25 RUB)
-* [Boefjim](https://boefjim.com) - $16.13 (1000.00 RUB)
-* [JME](https://jme.bio/) - $12.47 (0.00047618 BTC)
-* [SrNrike](https://kyhlus.net/staff/srnrike) - $9.15 (617.00 RUB)
-* [Zag](https://zag.rip) - $7.45 (431.55 RUB)
-* [BennyKun](https://github.com/Benny-Kun) - $6.93 (0.00023698 BTC)
-* [NoctusRaven](https://www.twitch.tv/noctusraven) - $6.00
-* [Bilal_786](https://discord.gg/zabPuE78ne) - $5.79 (5.80 EUR)
-* [4NG3L](https://4ng3l.com/) - $5.77 (500.00 RUB)
-* [Eli404](https://linktr.ee/404femboy) - $5.09 (5.00 EUR)
-* [Kushgo](https://opensea.io/collection/worldtowers) - $5.00 (0.00313295 ETH)
-* Anonymous - $4.93 (0.00007299 BTC)
-* [5wi](https://github.com/5wi5wi) - $4.82 (471.00 RUB)
-* Lucid - $3.59 (300.00 RUB)
-* Nicola Occhipinti - $3.44 (309.00 RUB)
-* Yoshi - $3.28 (200.00 RUB)
-* Anonymous - $2.62 (0.00011304 BTC)
-* [ᏒᎥፈᏂᏦᏋᏋᎴ](https://github.com/RICH-KEED) - $2.10 (30.00 TRX)
-* Death - $1.93 (142.00 RUB)
-* Ribtex - $1.88 (150.00 RUB)
-* Jan - $1.49 (100.00 RUB)
-* [Mykm](https://github.com/yumiruuwu) - $1.30 (100.00 RUB)
-* [WoomyAisaka](https://woomyaisaka.com) - $1.00 (87.00 RUB)
-* CJPro25 - $0.91 (63.00 RUB)
-* [YJB](https://owo.yjb.gay/) - $0.69 (41.00 RUB)
-* Tofix.rs - $0.45 (1.00 BAT)
-* WEIRON GREIZER - $0.39 (27.66 RUB)
+> - **Multi-RP Mode:** Run up to 5 custom activities at once via unique fake PIDs per slot  
+> - **Cycle Presets:** 
+Two customizable modes to auto-rotate through a folder of `.cmrp` or `.crp` presets
+>   - **Cycle Mode 1 - Slot Swap:**
+Each switch interval connects one incoming activity, while disconnecting an outgoing. Continues across intervals until the activities of the transitioning preset are met before cycling to the next one.
+>   - **Cycle Mode 2 - Preset Swap** 
+Each switch interval fully morphs to the next `.cmrp` preset, still one activity at a time separated by 3 seconds so that RP's transition rather than drop off and return as next preset.
+> - **Match Order:** 
+Set a top to bottom display order for Listening & Watching activities, compatible with both Cycle Modes
+> - New Activity chart features (add / duplicate / remove / enable / disable, drag to reorder)  
+> - New `.cmrp` multi-activity preset format (still supports Legacy `.crp`)
+> - UX/UI improvements: 
+>   - Save Changes to a loaded preset  
+>   - Currently loaded preset indicator  
+>   - Option to load `.crp` preset as an added slot  
+>   - Polished Dark-mode further  
+>   - Removed annoying Windows alert sounds for all popups  
+> - Guards for Discord limits — max 5 enabled, unique Application IDs, only one Playing activity at a time  
+> - Optional Legacy mode for classic single-activity, and made compatible with Cycle Presets feature  
+> - Many other miscellaneous touch ups to account for this fork  
 
-### Non-monetary supporters
+### Keep it lowkey >:) 
+*This is too cool to see everywhere*
 
-* [vouivre](https://x.com/vvouivre) - [A furry art](https://www.customrp.xyz/donations/vouivre.png)
-* [Sojpan](https://x.com/Illeg__al) - [A furry art](https://www.customrp.xyz/donations/Sojpan.png)
-* [NearbyFish](https://x.com/Nearbyfish1) - [A furry art](https://www.customrp.xyz/donations/NearbyFish.png)
-* [Nekura](https://x.com/nekumellow) - [A furry art](https://www.customrp.xyz/donations/nekumellow.png)
+## Install
+- See [Releases](https://github.com/landnthrn/Discord-Multi-CustomRP/releases)
+- Download & use the installer or portable
 
-If you don't see your donation here after a day or two - ping me on Discord.
+## Found this useful? 
+Please leave a star on this repo and the [upstream repo](https://github.com/maximmax42/Discord-CustomRP) :)
 
-## Downloading and setting up
-Download the latest version from the [Releases](https://github.com/maximmax42/Discord-CustomRP/releases) page and run the .exe installer! You can also use Windows Package Manager to install the program (`winget install maximmax42.CustomRP`) or, if you prefer the portable version, download the zip, unpack it somewhere, preferably in a separate folder, and start it up. Upon starting, you will be prompted to open a [setup manual](https://docs.customrp.xyz/setting-up). You can open it later by pressing F1 or going to Help -> Open Manual.
-### Updating
-If you installed the app, updating is literally as easy as running the installer for the newer version. If you use a portable version, please make sure to extract the updated files into the same folder as you did before to keep your settings.
+#### Feel free to show support to the upstream developer through these sites:
+- [boosty.to/maximmax42](https://boosty.to/maximmax42)
+- [yoomoney.ru/to/41001998922598](https://yoomoney.ru/to/41001998922598)
+- [customrp.xyz/crypto ](https://github.com/maximmax42/Discord-CustomRP/blob/master/CRYPTO.md)
+
+---
+
 ### Troubleshooting & Feedback
 If you have any problems with the app, please check out the [FAQ](https://docs.customrp.xyz/faq) first. If this doesn't help, or you have any  suggestions on making the app more functional, you can open an issue ticket, use Discussions, or join the Discord server, link is at the top of the readme.
 
 ## Translations
+
+***All additions to this fork did not account for other languages than English***
 
 <a href="https://poeditor.com/join/project?hash=2jq0i7ANr1"><img alt="POEditor Translation Progress" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fwww.customrp.xyz%2Fpoeditor%2Fall.json"></a>
 
