@@ -120,10 +120,28 @@
       <Value Profile="(Default)">2</Value>
     </Setting>
     <Setting Name="matchDiscordListOrder" Type="System.Boolean" Scope="User">
-      <Value Profile="(Default)">True</Value>
+      <Value Profile="(Default)">False</Value>
     </Setting>
     <Setting Name="matchListOrderDelaySeconds" Type="System.Decimal" Scope="User">
       <Value Profile="(Default)">12</Value>
+    </Setting>
+    <Setting Name="alternatingPresetsEnabled" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">False</Value>
+    </Setting>
+    <Setting Name="alternatingPresetsFolder" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="alternatingPresetsUseCmrp" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">True</Value>
+    </Setting>
+    <Setting Name="alternatingPresetsIntervalMinutes" Type="System.Decimal" Scope="User">
+      <Value Profile="(Default)">5</Value>
+    </Setting>
+    <Setting Name="alternatingPresetsIntervalSeconds" Type="System.Decimal" Scope="User">
+      <Value Profile="(Default)">0</Value>
+    </Setting>
+    <Setting Name="cyclingPresetsMode" Type="System.Int32" Scope="User">
+      <Value Profile="(Default)">1</Value>
     </Setting>
   </Settings>
 </SettingsFile>

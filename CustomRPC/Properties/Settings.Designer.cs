@@ -469,7 +469,7 @@ namespace CustomRPC.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
         public bool matchDiscordListOrder {
             get {
                 return ((bool)(this["matchDiscordListOrder"]));
@@ -488,6 +488,78 @@ namespace CustomRPC.Properties {
             }
             set {
                 this["matchListOrderDelaySeconds"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool alternatingPresetsEnabled {
+            get {
+                return ((bool)(this["alternatingPresetsEnabled"]));
+            }
+            set {
+                this["alternatingPresetsEnabled"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string alternatingPresetsFolder {
+            get {
+                return ((string)(this["alternatingPresetsFolder"]));
+            }
+            set {
+                this["alternatingPresetsFolder"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool alternatingPresetsUseCmrp {
+            get {
+                return ((bool)(this["alternatingPresetsUseCmrp"]));
+            }
+            set {
+                this["alternatingPresetsUseCmrp"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("5")]
+        public decimal alternatingPresetsIntervalMinutes {
+            get {
+                return ((decimal)(this["alternatingPresetsIntervalMinutes"]));
+            }
+            set {
+                this["alternatingPresetsIntervalMinutes"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public decimal alternatingPresetsIntervalSeconds {
+            get {
+                return ((decimal)(this["alternatingPresetsIntervalSeconds"]));
+            }
+            set {
+                this["alternatingPresetsIntervalSeconds"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("1")]
+        public int cyclingPresetsMode {
+            get {
+                return ((int)(this["cyclingPresetsMode"]));
+            }
+            set {
+                this["cyclingPresetsMode"] = value;
             }
         }
         
