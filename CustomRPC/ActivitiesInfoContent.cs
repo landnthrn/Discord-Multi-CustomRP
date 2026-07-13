@@ -67,9 +67,6 @@ namespace CustomRPC
             TooltipLine.Text("- Choose a Cycle Mode", Indent),
             TooltipLine.Text("- Timer starts when all enabled activities are connected", Indent),
             TooltipLine.Blank(),
-            TooltipLine.Text("DISCLAIMER:", Indent, bold: true),
-            TooltipLine.Text("Editing is locked while Cycle Presets is enabled. Disable it before editing or creating presets.", Indent),
-            TooltipLine.Blank(),
         };
 
         public static TooltipLine[] GetCycleModeLines() => new[]
