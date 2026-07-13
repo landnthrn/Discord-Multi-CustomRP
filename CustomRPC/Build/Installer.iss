@@ -122,7 +122,12 @@ Root: HKA; Subkey: "Software\Classes\.crp\OpenWithProgids"; ValueType: string; V
 Root: HKA; Subkey: "Software\Classes\CustomRP.crp"; ValueType: string; ValueName: ""; ValueData: {#MyAppName} Preset; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\CustomRP.crp\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName},1"
 Root: HKA; Subkey: "Software\Classes\CustomRP.crp\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\.cmrp\OpenWithProgids"; ValueType: string; ValueName: "CustomRP.cmrp"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\CustomRP.cmrp"; ValueType: string; ValueName: ""; ValueData: {#MyAppName} Multi-RP Preset; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\CustomRP.cmrp\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName},1"
+Root: HKA; Subkey: "Software\Classes\CustomRP.cmrp\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\Applications\CustomRP.exe\SupportedTypes"; ValueType: string; ValueName: ".crp"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\Applications\CustomRP.exe\SupportedTypes"; ValueType: string; ValueName: ".cmrp"; ValueData: ""
 
 [Code]
 function NeedToInstallDotNet(): Boolean;
