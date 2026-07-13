@@ -3,6 +3,7 @@ using DiscordRPC.Message;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -19,6 +20,7 @@ namespace CustomRPC
         const int SlotConnectWaitTimeoutMs = 120 * 1000;
 
         readonly HashSet<string> matchOrderDelayingSlotIds = new HashSet<string>();
+        CancellationTokenSource sequenceCts;
 
         readonly string defaultApplicationId;
         readonly int defaultPipe;
@@ -181,7 +183,7 @@ namespace CustomRPC
                 onSlotStateChanged?.Invoke(slot);
 
                 if (showErrors)
-                    MessageBox.Show(e.Message, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    QuietMessageBox.Show(e.Message, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
 
                 return false;
             }
@@ -202,8 +204,71 @@ namespace CustomRPC
 
         public void DisconnectAllSlots()
         {
+            CancelPendingSequences();
             foreach (var slot in Slots.ToList())
                 DisconnectSlot(slot);
+        }
+
+        void CancelPendingSequences()
+        {
+            try
+            {
+                sequenceCts?.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+
+            ClearMatchOrderDelaying();
+        }
+
+        /// <summary>
+        /// Stops an in-progress Match Order delay sequence and immediately connects/updates
+        /// any slots that were still waiting in the delaying state.
+        /// </summary>
+        public void CancelMatchOrderDelayAndProceed()
+        {
+            var pending = Slots
+                .Where(s => matchOrderDelayingSlotIds.Contains(s.SlotId))
+                .ToList();
+
+            CancelPendingSequences();
+
+            foreach (var slot in pending)
+            {
+                if (slot == null || !slot.Enabled)
+                    continue;
+
+                if (slot.IsConnected)
+                {
+                    SetPresenceForSlot(slot, showErrors: false);
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(slot.ApplicationId))
+                    continue;
+
+                if (slot.ConnectionState == SlotConnectionState.Connecting ||
+                    slot.ConnectionState == SlotConnectionState.UpdatingPresence)
+                    continue;
+
+                ConnectSlot(slot);
+            }
+        }
+
+        CancellationToken BeginSequence()
+        {
+            CancelPendingSequences();
+            sequenceCts = new CancellationTokenSource();
+            return sequenceCts.Token;
+        }
+
+        static async Task DelayAsync(int milliseconds, CancellationToken cancellationToken)
+        {
+            if (milliseconds <= 0)
+                return;
+
+            await Task.Delay(milliseconds, cancellationToken);
         }
 
         public void ConnectSlot(PresenceSlot slot)
@@ -249,38 +314,47 @@ namespace CustomRPC
         public bool IsMatchOrderDelaying(PresenceSlot slot) =>
             slot != null && matchOrderDelayingSlotIds.Contains(slot.SlotId);
 
-        public async Task ConnectAllEnabledSlotsAsync(bool matchListOrder = false, int listeningWatchingDelayMs = 12000)
+        public async Task ConnectAllEnabledSlotsAsync(bool matchListOrder = false, Func<int> getListeningWatchingDelayMs = null)
         {
+            var cancellationToken = BeginSequence();
             var enabled = Slots.Where(s => s.Enabled && !string.IsNullOrWhiteSpace(s.ApplicationId) &&
                 !s.IsConnected &&
                 s.ConnectionState != SlotConnectionState.Connecting &&
                 s.ConnectionState != SlotConnectionState.UpdatingPresence).ToList();
 
-            if (!matchListOrder)
+            try
             {
-                for (int i = 0; i < enabled.Count; i++)
+                if (!matchListOrder)
                 {
-                    ConnectSlot(enabled[i]);
-                    if (i < enabled.Count - 1)
-                        await Task.Delay(SlotInitDelayMs);
+                    for (int i = 0; i < enabled.Count; i++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        ConnectSlot(enabled[i]);
+                        if (i < enabled.Count - 1)
+                            await DelayAsync(SlotInitDelayMs, cancellationToken);
+                    }
+
+                    return;
                 }
 
-                return;
+                var playingOrCompeting = enabled.Where(s => !IsListeningOrWatching(s)).ToList();
+                var listeningOrWatching = enabled.Where(IsListeningOrWatching).ToList();
+                listeningOrWatching.Reverse();
+
+                await RunMatchOrderSequenceAsync(
+                    playingOrCompeting,
+                    listeningOrWatching,
+                    getListeningWatchingDelayMs ?? (() => 12000),
+                    async slot =>
+                    {
+                        ConnectSlot(slot);
+                        await WaitForSlotConnectedAsync(slot, cancellationToken);
+                    },
+                    cancellationToken);
             }
-
-            var playingOrCompeting = enabled.Where(s => !IsListeningOrWatching(s)).ToList();
-            var listeningOrWatching = enabled.Where(IsListeningOrWatching).ToList();
-            listeningOrWatching.Reverse();
-
-            await RunMatchOrderSequenceAsync(
-                playingOrCompeting,
-                listeningOrWatching,
-                listeningWatchingDelayMs,
-                async slot =>
-                {
-                    ConnectSlot(slot);
-                    await WaitForSlotConnectedAsync(slot);
-                });
+            catch (OperationCanceledException)
+            {
+            }
         }
 
         void SetMatchOrderDelayingSlots(IEnumerable<PresenceSlot> slots)
@@ -313,11 +387,13 @@ namespace CustomRPC
         static bool IsListeningOrWatching(PresenceSlot slot) =>
             slot.ActivityType == ActivityType.Listening || slot.ActivityType == ActivityType.Watching;
 
-        static async Task WaitForSlotConnectedAsync(PresenceSlot slot)
+        static async Task WaitForSlotConnectedAsync(PresenceSlot slot, CancellationToken cancellationToken)
         {
             var deadline = DateTime.UtcNow.AddMilliseconds(SlotConnectWaitTimeoutMs);
             while (DateTime.UtcNow < deadline)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (slot.ConnectionState == SlotConnectionState.Connected)
                     return;
 
@@ -325,7 +401,7 @@ namespace CustomRPC
                     slot.ConnectionState == SlotConnectionState.Disconnected)
                     return;
 
-                await Task.Delay(50);
+                await DelayAsync(50, cancellationToken);
             }
         }
 
@@ -341,44 +417,54 @@ namespace CustomRPC
         public async Task UpdateAllEnabledSlotsAsync(
             bool force = false,
             bool matchListOrder = false,
-            int listeningWatchingDelayMs = 12000)
+            Func<int> getListeningWatchingDelayMs = null)
         {
             if (!force && !TryBeginBulkUpdate())
                 return;
 
+            var cancellationToken = BeginSequence();
             var enabled = Slots.Where(s => s.Enabled && s.IsConnected).ToList();
 
-            if (!matchListOrder)
+            try
             {
-                foreach (var slot in enabled)
+                if (!matchListOrder)
                 {
-                    SetPresenceForSlot(slot, showErrors: false);
-                    await Task.Delay(250);
+                    foreach (var slot in enabled)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        SetPresenceForSlot(slot, showErrors: false);
+                        await DelayAsync(250, cancellationToken);
+                    }
+
+                    return;
                 }
 
-                return;
+                var playingOrCompeting = enabled.Where(s => !IsListeningOrWatching(s)).ToList();
+                var listeningOrWatching = enabled.Where(IsListeningOrWatching).ToList();
+                listeningOrWatching.Reverse();
+
+                await RunMatchOrderSequenceAsync(
+                    playingOrCompeting,
+                    listeningOrWatching,
+                    getListeningWatchingDelayMs ?? (() => 12000),
+                    async slot =>
+                    {
+                        SetPresenceForSlot(slot, showErrors: false);
+                        await WaitForSlotConnectedAsync(slot, cancellationToken);
+                    },
+                    cancellationToken);
             }
-
-            var playingOrCompeting = enabled.Where(s => !IsListeningOrWatching(s)).ToList();
-            var listeningOrWatching = enabled.Where(IsListeningOrWatching).ToList();
-            listeningOrWatching.Reverse();
-
-            await RunMatchOrderSequenceAsync(
-                playingOrCompeting,
-                listeningOrWatching,
-                listeningWatchingDelayMs,
-                async slot =>
-                {
-                    SetPresenceForSlot(slot, showErrors: false);
-                    await WaitForSlotConnectedAsync(slot);
-                });
+            catch (OperationCanceledException)
+            {
+            }
         }
 
         async Task RunMatchOrderSequenceAsync(
             List<PresenceSlot> playingOrCompeting,
             List<PresenceSlot> listeningOrWatching,
-            int listeningWatchingDelayMs,
-            Func<PresenceSlot, Task> processSlotAsync)
+            Func<int> getListeningWatchingDelayMs,
+            Func<PresenceSlot, Task> processSlotAsync,
+            CancellationToken cancellationToken)
         {
             try
             {
@@ -387,13 +473,16 @@ namespace CustomRPC
 
                 for (int i = 0; i < playingOrCompeting.Count; i++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     await processSlotAsync(playingOrCompeting[i]);
                     if (i < playingOrCompeting.Count - 1)
-                        await Task.Delay(SlotInitDelayMs);
+                        await DelayAsync(SlotInitDelayMs, cancellationToken);
                 }
 
                 for (int i = 0; i < listeningOrWatching.Count; i++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     var waiting = listeningOrWatching.Skip(i + 1).ToList();
                     if (waiting.Count > 0)
                         SetMatchOrderDelayingSlots(waiting);
@@ -405,7 +494,8 @@ namespace CustomRPC
                     if (i < listeningOrWatching.Count - 1)
                     {
                         SetMatchOrderDelayingSlots(listeningOrWatching.Skip(i + 1));
-                        await Task.Delay(Math.Max(0, listeningWatchingDelayMs));
+                        int delayMs = Math.Max(0, getListeningWatchingDelayMs());
+                        await DelayAsync(delayMs, cancellationToken);
                     }
                 }
             }
@@ -449,7 +539,7 @@ namespace CustomRPC
 
         void SlotOnReady(PresenceSlot slot, object sender, ReadyMessage args)
         {
-            if (profileRecoveryActive)
+            if (profileRecoveryActive || !IsCurrentClient(slot, sender))
                 return;
 
             if (TryHandleDiscordUsernameChange(args.User?.Username))
@@ -462,6 +552,9 @@ namespace CustomRPC
 
         void SlotOnPresenceUpdate(PresenceSlot slot, object sender, PresenceMessage args)
         {
+            if (!IsCurrentClient(slot, sender))
+                return;
+
             slot.ConnectionState = SlotConnectionState.Connected;
             slot.LastError = "";
             StopRestartTimer(slot.SlotId);
@@ -470,7 +563,11 @@ namespace CustomRPC
 
         void SlotOnClose(PresenceSlot slot, object sender, CloseMessage args)
         {
-            if (profileRecoveryActive)
+            if (profileRecoveryActive || !IsCurrentClient(slot, sender))
+                return;
+
+            // Intentional disconnect already set Disconnected — ignore teardown Close noise.
+            if (slot.ConnectionState == SlotConnectionState.Disconnected)
                 return;
 
             slot.ConnectionState = SlotConnectionState.Disconnected;
@@ -483,19 +580,53 @@ namespace CustomRPC
 
         void SlotOnError(PresenceSlot slot, object sender, ErrorMessage args)
         {
-            slot.ConnectionState = SlotConnectionState.Error;
+            if (!IsCurrentClient(slot, sender))
+                return;
+
+            if (slot.ConnectionState == SlotConnectionState.Disconnected)
+                return;
+
             slot.LastError = args.Message;
+
+            // Discord RPC often emits a brief OnError during handshake before OnReady.
+            // Stay on Connecting so the status does not flash Error then Updating.
+            if (slot.ConnectionState == SlotConnectionState.Connecting)
+            {
+                StartRestartTimer(slot);
+                return;
+            }
+
+            slot.ConnectionState = SlotConnectionState.Error;
             onSlotStateChanged?.Invoke(slot);
             StartRestartTimer(slot);
         }
 
         void SlotOnConnectionFailed(PresenceSlot slot, object sender, ConnectionFailedMessage args)
         {
-            slot.ConnectionState = SlotConnectionState.Error;
+            if (!IsCurrentClient(slot, sender))
+                return;
+
+            if (slot.ConnectionState == SlotConnectionState.Disconnected)
+                return;
+
             slot.LastError = "Connection failed";
+
+            if (slot.ConnectionState == SlotConnectionState.Connecting)
+            {
+                StartRestartTimer(slot);
+                return;
+            }
+
+            slot.ConnectionState = SlotConnectionState.Error;
             onSlotStateChanged?.Invoke(slot);
             StartRestartTimer(slot);
         }
+
+        static bool IsCurrentClient(PresenceSlot slot, object sender) =>
+            slot != null &&
+            slot.Client != null &&
+            !slot.Client.IsDisposed &&
+            ReferenceEquals(slot.Client, sender);
 
         void EnterUpdatingPresence(PresenceSlot slot)
         {
@@ -595,7 +726,7 @@ namespace CustomRPC
             if (!string.IsNullOrEmpty(build.ImageErrorField))
             {
                 var res = new System.ComponentModel.ComponentResourceManager(typeof(MainForm));
-                MessageBox.Show(
+                QuietMessageBox.Show(
                     Strings.errorInvalidImageURL + " (" + res.GetString("label" + build.ImageErrorField + ".Text") + ")",
                     Strings.error,
                     MessageBoxButtons.OK,
@@ -604,7 +735,7 @@ namespace CustomRPC
             }
 
             if (!string.IsNullOrEmpty(build.ErrorMessage))
-                MessageBox.Show(build.ErrorMessage, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                QuietMessageBox.Show(build.ErrorMessage, Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
 
         public void Dispose()
