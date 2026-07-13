@@ -100,6 +100,7 @@ namespace CustomRPC
                 {
                     Version = stored.Version > 0 ? stored.Version : 1,
                     SelectedSlotId = stored.SelectedSlotId ?? "",
+                    LoadedPresetPath = stored.LoadedPresetPath ?? "",
                     Slots = (stored.Slots ?? new List<StoredPresenceSlot>())
                         .Select(s => s.ToPresenceSlot())
                         .ToList(),
@@ -122,6 +123,7 @@ namespace CustomRPC
                 {
                     Version = config?.Version > 0 ? config.Version : 1,
                     SelectedSlotId = config?.SelectedSlotId ?? "",
+                    LoadedPresetPath = config?.LoadedPresetPath ?? "",
                     Slots = (config?.Slots ?? new List<PresenceSlot>())
                         .Select(StoredPresenceSlot.FromPresenceSlot)
                         .ToList(),
@@ -132,17 +134,18 @@ namespace CustomRPC
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"{Strings.errorSavingSettings} {ex.Message}", Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                QuietMessageBox.Show($"{Strings.errorSavingSettings} {ex.Message}", Strings.error, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
         }
 
-        public static SlotConfig FromSlots(IEnumerable<PresenceSlot> slots, string selectedSlotId)
+        public static SlotConfig FromSlots(IEnumerable<PresenceSlot> slots, string selectedSlotId, string loadedPresetPath = null)
         {
             return new SlotConfig
             {
                 Version = 1,
                 SelectedSlotId = selectedSlotId ?? "",
+                LoadedPresetPath = loadedPresetPath ?? "",
                 Slots = slots.Select(CloneForExport).ToList(),
             };
         }
@@ -174,6 +177,7 @@ namespace CustomRPC
     {
         public int Version { get; set; } = 1;
         public string SelectedSlotId { get; set; } = "";
+        public string LoadedPresetPath { get; set; } = "";
         public List<PresenceSlot> Slots { get; set; } = new List<PresenceSlot>();
     }
 
@@ -291,6 +295,7 @@ namespace CustomRPC
     {
         public int Version { get; set; } = 1;
         public string SelectedSlotId { get; set; } = "";
+        public string LoadedPresetPath { get; set; } = "";
         public List<StoredPresenceSlot> Slots { get; set; } = new List<StoredPresenceSlot>();
     }
 }

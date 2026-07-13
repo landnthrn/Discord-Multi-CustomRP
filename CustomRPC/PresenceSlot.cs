@@ -165,6 +165,7 @@ namespace CustomRPC
                 Button1Url = preset.Button1URL ?? "",
                 Button2Text = preset.Button2Text ?? "",
                 Button2Url = preset.Button2URL ?? "",
+                Enabled = !preset.EnabledSpecified || preset.Enabled,
             };
         }
 
@@ -196,6 +197,8 @@ namespace CustomRPC
                 Button1URL = Button1Url,
                 Button2Text = Button2Text,
                 Button2URL = Button2Url,
+                Enabled = Enabled,
+                EnabledSpecified = true,
             };
         }
 
@@ -264,6 +267,8 @@ namespace CustomRPC
     {
         public int Version { get; set; } = 1;
         public string SelectedSlotId { get; set; } = "";
+        public bool? MatchDiscordListOrder { get; set; }
+        public decimal? MatchListOrderDelaySeconds { get; set; }
         public StoredPresenceSlot[] Slots { get; set; } = new StoredPresenceSlot[0];
     }
 }
