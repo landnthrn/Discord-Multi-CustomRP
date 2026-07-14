@@ -110,6 +110,7 @@ namespace CustomRPC
                 OnProfileSwitchRecovery);
 
             LoadSlotsFromStorage();
+            CaptureLoadedPresetBaseline();
             SetupActivitiesPanel();
             buttonConnect.Text = "Connect Slot";
             buttonDisconnect.Text = "Disconnect Slot";
@@ -127,7 +128,7 @@ namespace CustomRPC
             LoadSelectedSlotToEditor();
             RefreshSlotListView();
 
-            // Cycle Presets left on across restart: snapshot after the editor is hydrated.
+            // Cycle RP's left on across restart: snapshot after the editor is hydrated.
             if (settings.alternatingPresetsEnabled)
             {
                 activeCyclePresetPath = loadedPresetPath;
@@ -681,6 +682,7 @@ namespace CustomRPC
             slotService.Slots.Insert(targetIndex, slot);
             selectedSlotId = slot.SlotId;
             RefreshSlotListView();
+            UpdateActivePresetMenuLabels();
             SaveSlotsToStorage();
         }
 
@@ -1179,13 +1181,62 @@ namespace CustomRPC
                 return true;
             }
 
-            if (slotService.Slots.Count(s => s.Enabled) >= MaxEnabledActivities)
+            if (!CanEnableSlot(slot, out _))
             {
                 slot.Enabled = false;
                 return false;
             }
 
             slot.Enabled = true;
+            return true;
+        }
+
+        /// <summary>
+        /// Editing-mode Enabled rules (not used while Cycle RP's is locking the chart).
+        /// Checks the chart as it stands — <paramref name="slot"/> may or may not already be in the list.
+        /// </summary>
+        bool CanEnableSlot(PresenceSlot slot, out string errorMessage)
+        {
+            errorMessage = null;
+            if (slot == null)
+            {
+                errorMessage = "No activity selected.";
+                return false;
+            }
+
+            if (!IsMultiSlotRpcMode())
+                return true;
+
+            int enabledOthers = slotService.Slots.Count(s =>
+                s.Enabled && s.SlotId != slot.SlotId);
+
+            if (enabledOthers >= MaxEnabledActivities)
+            {
+                errorMessage = ActivitiesUiText.MaxEnabledActivities;
+                return false;
+            }
+
+            string appId = NormalizeApplicationId(slot.ApplicationId);
+            if (!string.IsNullOrEmpty(appId) &&
+                slotService.Slots.Any(s =>
+                    s.Enabled &&
+                    s.SlotId != slot.SlotId &&
+                    NormalizeApplicationId(s.ApplicationId) == appId))
+            {
+                errorMessage = ActivitiesUiText.DuplicateApplicationIdEnable;
+                return false;
+            }
+
+            if (slot.ActivityType == ActivityType.Playing &&
+                slotService.Slots.Any(s =>
+                    s.Enabled &&
+                    s.SlotId != slot.SlotId &&
+                    s.ActivityType == ActivityType.Playing))
+            {
+                errorMessage = ActivitiesUiText.MultiplePlayingEnable;
+                return false;
+            }
+
             return true;
         }
 
@@ -1421,7 +1472,7 @@ namespace CustomRPC
                 buttonConnect.Enabled = false;
                 buttonDisconnect.Enabled = false;
                 buttonUpdatePresence.Enabled = false;
-                // While Cycle Presets is on, Connect All remains available to start the timer,
+                // While Cycle RP's is on, Connect All remains available to start the timer,
                 // and Disconnect All remains available to cancel the session.
                 if (buttonUpdateAll != null)
                     buttonUpdateAll.Enabled = false;
@@ -1433,7 +1484,7 @@ namespace CustomRPC
             if (slot == null || textBoxID == null)
                 return;
 
-            // While Cycle Presets is on, keep the ID field neutral (no green/red/duplicate flash).
+            // While Cycle RP's is on, keep the ID field neutral (no green/red/duplicate flash).
             if (IsCyclingEditLocked())
             {
                 textBoxID.BackColor = CurrentColors.BgTextFields;
@@ -1727,23 +1778,22 @@ namespace CustomRPC
             bool enabling = targets.Any(s => !s.Enabled);
             if (enabling)
             {
-                int enabledCount = slotService.Slots.Count(s => s.Enabled);
-                bool hitLimit = false;
+                string blockMessage = null;
                 foreach (var slot in targets.Where(s => !s.Enabled))
                 {
-                    if (enabledCount >= MaxEnabledActivities)
+                    if (!CanEnableSlot(slot, out string error))
                     {
-                        hitLimit = true;
-                        break;
+                        if (blockMessage == null)
+                            blockMessage = error;
+                        continue;
                     }
 
                     slot.Enabled = true;
-                    enabledCount++;
                     UpdateListItemForSlot(slot);
                 }
 
-                if (hitLimit)
-                    ShowSlotConstraintMessage(ActivitiesUiText.MaxEnabledActivities);
+                if (blockMessage != null)
+                    ShowSlotConstraintMessage(blockMessage);
             }
             else
             {
@@ -1756,6 +1806,7 @@ namespace CustomRPC
 
             UpdateToggleEnabledButtonText();
             UpdateGlobalConnectionUi();
+            UpdateActivePresetMenuLabels();
             SaveSlotsToStorage();
         }
 
@@ -1888,7 +1939,7 @@ namespace CustomRPC
 
         void SaveEditorToSelectedSlot(bool refreshList = true)
         {
-            // While Cycle Presets is on, the editor is locked — never write it back into slots.
+            // While Cycle RP's is on, the editor is locked — never write it back into slots.
             if (IsCyclingEditLocked())
                 return;
 
@@ -1940,6 +1991,8 @@ namespace CustomRPC
 
             if (refreshList)
                 UpdateListItemForSlot(slot);
+
+            UpdateActivePresetMenuLabels();
         }
 
         PresenceBuilder.BuildResult BuildPresenceForSlot(PresenceSlot slot)
@@ -1978,6 +2031,7 @@ namespace CustomRPC
             selectedSlotId = slot.SlotId;
             LoadSelectedSlotToEditor();
             RefreshSlotListView();
+            UpdateActivePresetMenuLabels();
             SaveSlotsToStorage();
         }
 
@@ -2003,6 +2057,7 @@ namespace CustomRPC
             selectedSlotId = lastCopy?.SlotId;
             LoadSelectedSlotToEditor();
             RefreshSlotListView();
+            UpdateActivePresetMenuLabels();
             SaveSlotsToStorage();
         }
 
@@ -2018,7 +2073,14 @@ namespace CustomRPC
             string confirm = targets.Count == 1
                 ? $"Remove activity \"{targets[0].Label}\"?"
                 : $"Remove {targets.Count} selected activities?";
-            if (QuietMessageBox.Show(this, confirm, Application.ProductName, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question) != DialogResult.Yes)
+            if (QuietMessageBox.Show(
+                    this,
+                    confirm,
+                    Application.ProductName,
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button1,
+                    new QuietMessageBox.ChoiceButtonLabels { Yes = "&Yes", No = "&Cancel" }) != DialogResult.Yes)
                 return;
 
             int firstIndex = targets
@@ -2044,6 +2106,7 @@ namespace CustomRPC
             LoadSelectedSlotToEditor();
             RefreshSlotListView();
             UpdateSlotActionButtons();
+            UpdateActivePresetMenuLabels();
             SaveSlotsToStorage();
         }
 
@@ -2390,6 +2453,7 @@ namespace CustomRPC
             RefreshSlotListView();
             RestoreListSelection(keepEditorFocus: true, ensureVisible: true);
             UpdateSlotActionButtons();
+            UpdateActivePresetMenuLabels();
             SaveSlotsToStorage();
         }
 

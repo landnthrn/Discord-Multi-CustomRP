@@ -1,4 +1,6 @@
+using DiscordRPC;
 using System;
+using System.Collections.Generic;
 using System.Windows.Forms;
 
 namespace CustomRPC
@@ -90,7 +92,8 @@ namespace CustomRPC
         }
 
         /// <summary>
-        /// Keeps chart order: first MaxEnabledActivities already-Enabled slots stay on; the rest turn off.
+        /// Keeps chart order: first MaxEnabledActivities already-Enabled slots stay on
+        /// (also only one Playing and unique App IDs among enabled); the rest turn off.
         /// </summary>
         void EnforceEnabledSlotCapForMultiMode()
         {
@@ -98,14 +101,29 @@ namespace CustomRPC
                 return;
 
             int enabledCount = 0;
+            bool playingKept = false;
+            var keptAppIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             foreach (var slot in slotService.Slots)
             {
                 if (!slot.Enabled)
                     continue;
 
-                enabledCount++;
-                if (enabledCount > MaxEnabledActivities)
+                string appId = NormalizeApplicationId(slot.ApplicationId);
+                bool appClash = !string.IsNullOrEmpty(appId) && keptAppIds.Contains(appId);
+                bool playingClash = slot.ActivityType == ActivityType.Playing && playingKept;
+
+                if (enabledCount >= MaxEnabledActivities || appClash || playingClash)
+                {
                     slot.Enabled = false;
+                    continue;
+                }
+
+                enabledCount++;
+                if (slot.ActivityType == ActivityType.Playing)
+                    playingKept = true;
+                if (!string.IsNullOrEmpty(appId))
+                    keptAppIds.Add(appId);
             }
         }
 
