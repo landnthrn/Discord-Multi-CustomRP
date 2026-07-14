@@ -117,9 +117,9 @@ namespace CustomRPC
     {
         const string MultiSlotPresetExtension = ".cmrp";
         const string LoadPresetFilter =
-            "Multi-RP Preset (*.cmrp)|*.cmrp|Uni-RP Preset (*.crp)|*.crp|Both (*.cmrp) (*.crp)|*.cmrp;*.crp";
+            "Multi-RP's Preset (*.cmrp)|*.cmrp|Uni-RP Preset (*.crp)|*.crp|Both (*.cmrp) (*.crp)|*.cmrp;*.crp";
         const string SavePresetFilter =
-            "Multi-RP Preset (*.cmrp)|*.cmrp|Uni-RP Preset (*.crp)|*.crp";
+            "Multi-RP's Preset (*.cmrp)|*.cmrp|Uni-RP Preset (*.crp)|*.crp";
 
         static bool IsMultiSlotPresetFile(string path) =>
             !string.IsNullOrEmpty(path) &&
@@ -130,6 +130,12 @@ namespace CustomRPC
         /// Save Changes writes only to this path.
         /// </summary>
         string loadedPresetPath;
+
+        /// <summary>
+        /// Chart fingerprint captured when <see cref="loadedPresetPath"/> was set or saved.
+        /// Used for the menu "(Altered)" marker.
+        /// </summary>
+        string loadedPresetBaselineFingerprint;
 
         ToolStripLabel toolStripLabelActivePresetPrefix;
         ToolStripLabel toolStripLabelActivePresetName;
@@ -883,7 +889,7 @@ namespace CustomRPC
             if (IsCyclingEditLocked())
                 return;
 
-            if (QuietMessageBox.Show(this, Strings.newPresetConfirmation, Application.ProductName, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question) != DialogResult.Yes)
+            if (QuietMessageBox.Show(this, Strings.newPresetConfirmation, Application.ProductName, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button1, new QuietMessageBox.ChoiceButtonLabels { Yes = "&Yes", No = "&Cancel" }) != DialogResult.Yes)
                 return;
 
             ClearLoadedPresetPath();
@@ -983,7 +989,14 @@ namespace CustomRPC
                         ActivitiesUiText.LoadCrpChooseMode,
                         Application.ProductName,
                         MessageBoxButtons.YesNoCancel,
-                        MessageBoxIcon.Question);
+                        MessageBoxIcon.Question,
+                        MessageBoxDefaultButton.Button1,
+                        new QuietMessageBox.ChoiceButtonLabels
+                        {
+                            Yes = ActivitiesUiText.LoadCrpReplaceButton,
+                            No = ActivitiesUiText.LoadCrpAddButton,
+                            Cancel = ActivitiesUiText.LoadCrpCancelButton,
+                        });
 
                     if (choice == DialogResult.Cancel)
                         return;
@@ -994,8 +1007,8 @@ namespace CustomRPC
                     }
                     else
                     {
+                        // Add into chart — keep current Active Preset indicator / loaded path.
                         LoadPreset(File.OpenRead(filePath), addAsNewSlot: true);
-                        SetLoadedPresetPath(filePath);
                     }
                 }
             }
@@ -1020,7 +1033,9 @@ namespace CustomRPC
                 else
                 {
                     LoadPreset(File.OpenRead(filePath), addAsNewSlot);
-                    SetLoadedPresetPath(filePath);
+                    // Adding a .crp into the chart must not steal the Active Preset name.
+                    if (!addAsNewSlot)
+                        SetLoadedPresetPath(filePath);
                 }
             }
             catch
@@ -1039,9 +1054,14 @@ namespace CustomRPC
                         this,
                         ActivitiesUiText.LoadCmrpReplaceConfirm,
                         Application.ProductName,
-                        MessageBoxButtons.YesNoCancel,
+                        MessageBoxButtons.YesNo,
                         MessageBoxIcon.Warning,
-                        MessageBoxDefaultButton.Button2);
+                        MessageBoxDefaultButton.Button2,
+                        new QuietMessageBox.ChoiceButtonLabels
+                        {
+                            Yes = "&Yes",
+                            No = "&Cancel",
+                        });
 
                     if (confirm != DialogResult.Yes)
                         return;
@@ -1160,6 +1180,7 @@ namespace CustomRPC
         void SetLoadedPresetPath(string path)
         {
             loadedPresetPath = string.IsNullOrWhiteSpace(path) ? null : path;
+            CaptureLoadedPresetBaseline();
             UpdateSaveChangesMenuItem();
             UpdateActivePresetMenuLabels();
             SaveSlotsToStorage();
@@ -1168,9 +1189,72 @@ namespace CustomRPC
         void ClearLoadedPresetPath()
         {
             loadedPresetPath = null;
+            loadedPresetBaselineFingerprint = null;
             UpdateSaveChangesMenuItem();
             UpdateActivePresetMenuLabels();
             SaveSlotsToStorage();
+        }
+
+        void CaptureLoadedPresetBaseline()
+        {
+            loadedPresetBaselineFingerprint = string.IsNullOrWhiteSpace(loadedPresetPath)
+                ? null
+                : ComputeChartFingerprint();
+        }
+
+        string ComputeChartFingerprint()
+        {
+            if (slotService?.Slots == null)
+                return "";
+
+            var sb = new System.Text.StringBuilder();
+            foreach (var slot in slotService.Slots)
+            {
+                if (slot == null)
+                    continue;
+
+                sb.Append(slot.Enabled ? '1' : '0').Append('\u001f');
+                sb.Append(slot.Label ?? "").Append('\u001f');
+                sb.Append((slot.ApplicationId ?? "").Trim()).Append('\u001f');
+                sb.Append(slot.Type).Append('\u001f');
+                sb.Append(slot.Display).Append('\u001f');
+                sb.Append(slot.Name ?? "").Append('\u001f');
+                sb.Append(slot.Details ?? "").Append('\u001f');
+                sb.Append(slot.DetailsUrl ?? "").Append('\u001f');
+                sb.Append(slot.State ?? "").Append('\u001f');
+                sb.Append(slot.StateUrl ?? "").Append('\u001f');
+                sb.Append(slot.PartySize).Append('\u001f');
+                sb.Append(slot.PartyMax).Append('\u001f');
+                sb.Append(slot.Timestamps).Append('\u001f');
+                sb.Append(slot.CustomTimestamp.Ticks).Append('\u001f');
+                sb.Append(slot.CustomTimestampEndEnabled ? '1' : '0').Append('\u001f');
+                sb.Append(slot.CustomTimestampEnd.Ticks).Append('\u001f');
+                sb.Append(slot.LargeImageKey ?? "").Append('\u001f');
+                sb.Append(slot.LargeImageText ?? "").Append('\u001f');
+                sb.Append(slot.LargeImageUrl ?? "").Append('\u001f');
+                sb.Append(slot.SmallImageKey ?? "").Append('\u001f');
+                sb.Append(slot.SmallImageText ?? "").Append('\u001f');
+                sb.Append(slot.SmallImageUrl ?? "").Append('\u001f');
+                sb.Append(slot.Button1Text ?? "").Append('\u001f');
+                sb.Append(slot.Button1Url ?? "").Append('\u001f');
+                sb.Append(slot.Button2Text ?? "").Append('\u001f');
+                sb.Append(slot.Button2Url ?? "").Append('\u001e');
+            }
+
+            return sb.ToString();
+        }
+
+        bool IsLoadedPresetAltered()
+        {
+            if (string.IsNullOrWhiteSpace(loadedPresetPath) || loadedPresetBaselineFingerprint == null)
+                return false;
+            if (settings != null && settings.alternatingPresetsEnabled)
+                return false;
+
+            return !string.Equals(
+                loadedPresetBaselineFingerprint,
+                ComputeChartFingerprint(),
+                StringComparison.Ordinal);
         }
 
         void SetupActivePresetMenuLabels()
@@ -1216,6 +1300,8 @@ namespace CustomRPC
             else if (!string.IsNullOrWhiteSpace(loadedPresetPath))
             {
                 nameInParens = "(" + Path.GetFileName(loadedPresetPath) + ")";
+                if (IsLoadedPresetAltered())
+                    nameInParens += " (Altered)";
             }
             else
             {
@@ -1303,17 +1389,25 @@ namespace CustomRPC
                 return "(…)" + arrow + "(…)";
             }
 
+            string alteredSuffix = "";
+            const string alteredMarker = " (Altered)";
+            if (nameInParens.EndsWith(alteredMarker, StringComparison.Ordinal))
+            {
+                alteredSuffix = alteredMarker;
+                nameInParens = nameInParens.Substring(0, nameInParens.Length - alteredMarker.Length);
+            }
+
             string inner = StripCycleParen(nameInParens);
             string ellipsis = "…";
             while (inner.Length > 1)
             {
                 inner = inner.Substring(0, inner.Length - 1);
-                string candidate = "(" + inner.TrimEnd() + ellipsis + ")";
+                string candidate = "(" + inner.TrimEnd() + ellipsis + ")" + alteredSuffix;
                 if (TextRenderer.MeasureText(candidate, font).Width <= maxNameWidth)
                     return candidate;
             }
 
-            return "(…)";
+            return "(…)" + alteredSuffix;
         }
 
         static string StripCycleParen(string value)
@@ -1375,9 +1469,14 @@ namespace CustomRPC
                     this,
                     string.Format(ActivitiesUiText.SaveChangesConfirm, presetName),
                     Application.ProductName,
-                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question,
-                    MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                    MessageBoxDefaultButton.Button2,
+                    new QuietMessageBox.ChoiceButtonLabels
+                    {
+                        Yes = "&Yes",
+                        No = "&Cancel",
+                    }) != DialogResult.Yes)
                 return;
 
             while (true)
@@ -1402,6 +1501,8 @@ namespace CustomRPC
                     }
 
                     Analytics.TrackEvent("Saved changes to loaded preset");
+                    CaptureLoadedPresetBaseline();
+                    UpdateActivePresetMenuLabels();
                     return;
                 }
                 catch (Exception ex)
