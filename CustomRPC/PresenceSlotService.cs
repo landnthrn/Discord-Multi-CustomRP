@@ -44,6 +44,9 @@ namespace CustomRPC
             }
         }
 
+        /// <summary>When true, presence build/set failures update slot state without QuietMessageBox (used while Cycle RP's is running).</summary>
+        public bool SuppressPresenceErrorUi { get; set; }
+
         public List<PresenceSlot> Slots { get; } = new List<PresenceSlot>();
 
         public PresenceSlotService(
@@ -149,6 +152,9 @@ namespace CustomRPC
         {
             if (slot == null)
                 return false;
+
+            if (SuppressPresenceErrorUi)
+                showErrors = false;
 
             if (!ignoreThrottle && (DateTime.UtcNow - slot.LastPresenceUpdate).TotalMilliseconds < 1000)
                 return false;
@@ -271,7 +277,9 @@ namespace CustomRPC
             await Task.Delay(milliseconds, cancellationToken);
         }
 
-        public void ConnectSlot(PresenceSlot slot)
+        public void ConnectSlot(PresenceSlot slot) => ConnectSlot(slot, showErrors: true);
+
+        public void ConnectSlot(PresenceSlot slot, bool showErrors)
         {
             if (slot == null)
                 return;
@@ -298,7 +306,7 @@ namespace CustomRPC
 
             if (slot.IsConnected)
             {
-                SetPresenceForSlot(slot, showErrors: true);
+                SetPresenceForSlot(slot, showErrors: showErrors, ignoreThrottle: !showErrors);
                 return;
             }
 
@@ -547,7 +555,7 @@ namespace CustomRPC
 
             StopRestartTimer(slot.SlotId);
             EnterUpdatingPresence(slot);
-            SetPresenceForSlot(slot, showErrors: true, ignoreThrottle: true);
+            SetPresenceForSlot(slot, showErrors: !SuppressPresenceErrorUi, ignoreThrottle: true);
         }
 
         void SlotOnPresenceUpdate(PresenceSlot slot, object sender, PresenceMessage args)
