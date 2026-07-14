@@ -123,7 +123,7 @@ Root: HKA; Subkey: "Software\Classes\CustomRP.crp"; ValueType: string; ValueName
 Root: HKA; Subkey: "Software\Classes\CustomRP.crp\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName},1"
 Root: HKA; Subkey: "Software\Classes\CustomRP.crp\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\.cmrp\OpenWithProgids"; ValueType: string; ValueName: "CustomRP.cmrp"; ValueData: ""; Flags: uninsdeletevalue
-Root: HKA; Subkey: "Software\Classes\CustomRP.cmrp"; ValueType: string; ValueName: ""; ValueData: {#MyAppName} Multi-RP Preset; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\CustomRP.cmrp"; ValueType: string; ValueName: ""; ValueData: {#MyAppName} Multi-RP's Preset; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\CustomRP.cmrp\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName},1"
 Root: HKA; Subkey: "Software\Classes\CustomRP.cmrp\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\Applications\CustomRP.exe\SupportedTypes"; ValueType: string; ValueName: ".crp"; ValueData: ""

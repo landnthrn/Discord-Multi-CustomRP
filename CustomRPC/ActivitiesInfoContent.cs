@@ -44,6 +44,9 @@ namespace CustomRPC
             TooltipLine.Blank(),
             TooltipLine.Text("Drag & drop to arrange order of slots. ", MatchIndent),
             TooltipLine.Blank(),
+            TooltipLine.WithRuns(MatchIndent, new TooltipRun("If using with Cycle RP's", bold: true)),
+            TooltipLine.Text("Make sure to read all Cycle RP's tooltips", MatchIndent),
+            TooltipLine.Blank(),
         };
 
         public static TooltipLine[] GetMatchOrderDelayLines() => new[]
@@ -58,14 +61,17 @@ namespace CustomRPC
         public static TooltipLine[] GetCyclePresetsLines() => new[]
         {
             TooltipLine.Blank(),
-            TooltipLine.Text("Cycle Presets", Indent, bold: true),
-            TooltipLine.Text("Cycles connecting different preset files in a folder in order of filename (A–Z), then repeats.", Indent),
+            TooltipLine.Text("Cycle RP's", Indent, bold: true),
+            TooltipLine.Text("Cycles connecting different activities from preset files in a folder in order of filename (A–Z), then repeats. If incoming activities match a present activity's application ID, it targets it for it's replacement/outgoing, unless Match Order is enabled.", Indent),
             TooltipLine.Blank(),
             TooltipLine.Text("- Point to a folder that holds presets you want it to cycle through", Indent),
             TooltipLine.Text("- Pick .cmrp for multi-activity presets or .crp for single-activity presets", Indent),
             TooltipLine.Text("- Set the switch interval in minutes and/or seconds", Indent),
             TooltipLine.Text("- Choose a Cycle Mode", Indent),
             TooltipLine.Text("- Timer starts when all enabled activities are connected", Indent),
+            TooltipLine.Blank(),
+            TooltipLine.Text("Disclaimer", Indent, bold: true),
+            TooltipLine.Text("A very low switch interval (e.g. 0min 10sec) can lag Discord itself, especially for Preset Swap mode. Images/GIFs size & resolution, can also impact the lag.", Indent),
             TooltipLine.Blank(),
         };
 
@@ -87,14 +93,14 @@ namespace CustomRPC
             TooltipLine.Text("- Only available for .cmrp", Indent),
             TooltipLine.Blank(),
             TooltipLine.Text("Match Order Compatibility", Indent, bold: true),
-            TooltipLine.Text("Both cycle modes supports Match Order, but requires specifics and should be used correctly.", Indent),
+            TooltipLine.Text("Both cycle modes supports Match Order, it's a little on the side of an experimental feature for cycling RP's, requires specifics and should be used correctly.", Indent),
             TooltipLine.Blank(),
-            TooltipLine.Text("Match Order must be enabled when Cycle Presets gets enabled, the Match Order state will apply the same across any incoming presets regardless of their Match Order state.", Indent),
+            TooltipLine.Text("Match Order must be enabled when Cycle RP's gets enabled, the Match Order state will apply the same across any incoming presets regardless of their Match Order state.", Indent),
             TooltipLine.Blank(),
             TooltipLine.Text("Difference between the modes in regard to Match Order:", Indent, bold: true),
             TooltipLine.Blank(),
             TooltipLine.Text("Slot Swap:", Indent, bold: true),
-            TooltipLine.Text("The delay for Match Order isn't used since the switch interval acts as it.", Indent),
+            TooltipLine.Text("The delay for Match Order isn't used since the switch interval acts as it, so it's recommended to set as time above 12 seconds to be safe on keeping order", Indent),
             TooltipLine.Text("Preset Swap:", Indent, bold: true),
             TooltipLine.Text("Uses Match Order delay. It's recommended to set Switch Interval time longer than the multiple of Match Order delay by the amount of Listening/Watching activities of the preset that has the most of them.", Indent),
             TooltipLine.Blank(),

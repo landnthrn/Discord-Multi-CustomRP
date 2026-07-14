@@ -16,6 +16,14 @@ namespace CustomRPC
         public const string MaxEnabledActivities =
             "Discord only shows up to 5 enabled activities, disable another activity before enabling this one.";
 
+        public const string DuplicateApplicationIdEnable =
+            "Another enabled activity already uses this Application ID.\r\n\r\n" +
+            "Disable that one first, or use a different ID.";
+
+        public const string MultiplePlayingEnable =
+            "Only one Playing activity can be enabled at a time.\r\n\r\n" +
+            "Disable or change the other Playing activity first.";
+
         public const string DuplicateApplicationIdConnectAll =
             "Multiple enabled activities are using the same Application ID. \r\n\r\n" +
             "Add another ID for whatever one(s) are shared, or use disable.";
@@ -33,11 +41,14 @@ namespace CustomRPC
             "Disable or change the activity type on extra Playing slot(s) before connecting.";
 
         public const string LoadCrpChooseMode =
-            "Do you want to replace chart with this preset?\r\n" +
-            "Otherwise, select 'No' to add this preset as an additional slot in the current chart.";
+            "Replace the current chart with this preset, or add it as another activity?";
+
+        public const string LoadCrpReplaceButton = "&Replace";
+        public const string LoadCrpAddButton = "&Add";
+        public const string LoadCrpCancelButton = "&Cancel";
 
         public const string LoadCmrpReplaceConfirm =
-            "Loading this Multi-RP preset will replace your current activities chart.\r\n\r\n" +
+            "Loading this Multi-RP's preset will replace your current activities chart.\r\n\r\n" +
             "Continue?";
 
         public const string SaveChangesNoLoadedPreset =
@@ -47,17 +58,17 @@ namespace CustomRPC
         public const string SaveChangesConfirm =
             "Save changes to \"{0}\"?";
 
-        public const string CyclePresetsTitle = "Cycle Presets";
+        public const string CyclePresetsTitle = "Cycle RP's";
         public const string CycleModeLabel = "Cycle Mode";
         public const string CycleModeSlotSwap = "Slot Swap";
         public const string CycleModePresetSwap = "Preset Swap";
-        public const string CyclingPresetsActiveBanner = "Cycle Presets is Active";
+        public const string CyclingPresetsActiveBanner = "Cycle RP's is Active";
         public const string CyclingPresetsPendingBanner =
-            "Cycle Presets Pending For All Activities Connected";
+            "Cycle RP's Pending For All Activities Connected";
         public const string CyclingPresetsPendingBannerLegacy =
-            "Cycle Presets Pending For Activity Connection";
+            "Cycle RP's Pending For Activity Connection";
         public const string CyclingPresetsActiveBannerTooltip =
-            "Cycle Presets is running. Controls are locked to ensure any edits don't get replaced.";
+            "Cycle RP's is running. Controls are locked to ensure any edits don't get replaced.";
         public const string CyclingPresetsPendingBannerTooltip =
             "Waiting for all enabled activities to be connected...";
         public const string CyclingPresetsPendingBannerTooltipLegacy =

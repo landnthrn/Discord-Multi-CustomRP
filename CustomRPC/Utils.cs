@@ -1271,7 +1271,7 @@ namespace CustomRPC
                 {
                     if (progKey == null)
                         return;
-                    progKey.SetValue("", "CustomRP Multi-RP Preset");
+                    progKey.SetValue("", "CustomRP Multi-RP's Preset");
                     using (var iconKey = progKey.CreateSubKey("DefaultIcon"))
                         iconKey?.SetValue("", "\"" + exePath + "\",1");
                     using (var cmdKey = progKey.CreateSubKey(@"shell\open\command"))
