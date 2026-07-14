@@ -34,6 +34,7 @@ namespace CustomRPC
         Label labelCyclingActiveBanner;
         DarkHoverPopup alternatingPresetsHoverPopup;
         DarkHoverPopup cycleModeHoverPopup;
+        DarkHoverPopup switchIntervalHoverPopup;
         DarkHoverPopup cyclingActiveBannerHoverPopup;
         WinTimer alternatingPresetsTimer;
 
@@ -108,6 +109,10 @@ namespace CustomRPC
             cycleModeHoverPopup.MouseEnter += (_, __) => cycleModeHoverPopup.CancelHide();
             cycleModeHoverPopup.MouseLeave += (_, __) => cycleModeHoverPopup.ScheduleHide();
 
+            switchIntervalHoverPopup = new DarkHoverPopup();
+            switchIntervalHoverPopup.MouseEnter += (_, __) => switchIntervalHoverPopup.CancelHide();
+            switchIntervalHoverPopup.MouseLeave += (_, __) => switchIntervalHoverPopup.ScheduleHide();
+
             cyclingActiveBannerHoverPopup = new DarkHoverPopup();
             cyclingActiveBannerHoverPopup.MouseEnter += (_, __) => cyclingActiveBannerHoverPopup.CancelHide();
             cyclingActiveBannerHoverPopup.MouseLeave += (_, __) => cyclingActiveBannerHoverPopup.ScheduleHide();
@@ -135,8 +140,11 @@ namespace CustomRPC
             {
                 AutoSize = true,
                 Text = "Switch Interval",
+                Cursor = Cursors.Default,
                 Margin = Padding.Empty,
             };
+            labelAlternatingSwitchInterval.MouseEnter += SwitchIntervalLabel_MouseEnter;
+            labelAlternatingSwitchInterval.MouseLeave += SwitchIntervalLabel_MouseLeave;
 
             numericUpDownAlternatingMinutes = new NumericUpDown
             {
@@ -285,8 +293,15 @@ namespace CustomRPC
                 comboBoxCycleMode.SelectedIndex = mode;
                 settings.cyclingPresetsMode = mode;
 
+                if (settings.alternatingPresetsEnabled && !HasValidCycleFolder())
+                {
+                    settings.alternatingPresetsEnabled = false;
+                    Utils.SaveSettings();
+                }
+
                 checkBoxAlternatingEnabled.Checked = settings.alternatingPresetsEnabled;
                 SyncCycleModeAvailability();
+                UpdateCycleEnableAvailability();
             }
             finally
             {
@@ -482,6 +497,22 @@ namespace CustomRPC
         void CycleModeLabel_MouseLeave(object sender, EventArgs e) =>
             cycleModeHoverPopup?.ScheduleHide();
 
+        void SwitchIntervalLabel_MouseEnter(object sender, EventArgs e)
+        {
+            if (labelAlternatingSwitchInterval == null || switchIntervalHoverPopup == null)
+                return;
+
+            switchIntervalHoverPopup.CancelHide();
+            switchIntervalHoverPopup.ShowLines(
+                ActivitiesInfoContent.GetSwitchIntervalLines(),
+                labelAlternatingSwitchInterval.PointToScreen(Point.Empty),
+                RectangleToScreen(ClientRectangle),
+                null);
+        }
+
+        void SwitchIntervalLabel_MouseLeave(object sender, EventArgs e) =>
+            switchIntervalHoverPopup?.ScheduleHide();
+
         void CyclingActiveBanner_MouseEnter(object sender, EventArgs e)
         {
             if (labelCyclingActiveBanner == null || cyclingActiveBannerHoverPopup == null)
@@ -527,6 +558,7 @@ namespace CustomRPC
                 textBoxAlternatingFolder.Text = FormatAlternatingFolderDisplay(dialog.SelectedPath);
                 ResetCycleProgress(cancelInFlight: true);
                 Utils.SaveSettings();
+                UpdateCycleEnableAvailability();
                 SyncAlternatingPresetsTimer(restartIfRunning: true);
                 UpdateActivePresetMenuLabels();
             }
@@ -549,6 +581,27 @@ namespace CustomRPC
         {
             if (syncingAlternatingUi)
                 return;
+
+            if (checkBoxAlternatingEnabled.Checked && !HasValidCycleFolder())
+            {
+                syncingAlternatingUi = true;
+                try
+                {
+                    checkBoxAlternatingEnabled.Checked = false;
+                }
+                finally
+                {
+                    syncingAlternatingUi = false;
+                }
+
+                QuietMessageBox.Show(
+                    "Choose a valid Cycle RP's folder before enabling.",
+                    ActivitiesUiText.CyclePresetsTitle,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                UpdateCycleEnableAvailability();
+                return;
+            }
 
             settings.alternatingPresetsEnabled = checkBoxAlternatingEnabled.Checked;
             Utils.SaveSettings();
@@ -576,9 +629,26 @@ namespace CustomRPC
             }
 
             UpdateCyclingEditLock();
+            UpdateCycleEnableAvailability();
             SyncAlternatingPresetsTimer(restartIfRunning: true);
             UpdateActivePresetMenuLabels();
             MaybeAutoconnectForCycleSession();
+        }
+
+        bool HasValidCycleFolder() =>
+            settings != null &&
+            !string.IsNullOrWhiteSpace(settings.alternatingPresetsFolder) &&
+            Directory.Exists(settings.alternatingPresetsFolder);
+
+        void UpdateCycleEnableAvailability()
+        {
+            if (checkBoxAlternatingEnabled == null)
+                return;
+
+            // Always allow turning Cycle off; only block turning on without a folder.
+            bool canToggleOn = HasValidCycleFolder();
+            bool currentlyOn = checkBoxAlternatingEnabled.Checked;
+            checkBoxAlternatingEnabled.Enabled = currentlyOn || canToggleOn;
         }
 
         /// <summary>
@@ -961,6 +1031,8 @@ namespace CustomRPC
 
             SyncCycleModeAvailability();
 
+            UpdateCycleEnableAvailability();
+
             SyncActivitiesListScrollbar();
             UpdatePresetFileMenuItems();
 
@@ -1005,15 +1077,17 @@ namespace CustomRPC
             if (alternatingPresetsTimer == null)
                 return;
 
+            bool allConnected = AreAllEnabledSlotsConnected();
             bool shouldRun = settings.alternatingPresetsEnabled &&
                 !string.IsNullOrWhiteSpace(settings.alternatingPresetsFolder) &&
                 Directory.Exists(settings.alternatingPresetsFolder) &&
                 (cyclePresetSwapInProgress ||
                  (pendingCycleSteps != null && pendingCycleSteps.Count > 0) ||
-                 AreAllEnabledSlotsConnected());
+                 allConnected);
 
             if (!shouldRun)
             {
+                if (alternatingPresetsTimer.Enabled)
                 alternatingPresetsTimer.Stop();
                 return;
             }
@@ -1642,6 +1716,7 @@ namespace CustomRPC
                 SaveSlotsToStorage();
                 return;
             }
+
 
             if (incoming != null)
             {
