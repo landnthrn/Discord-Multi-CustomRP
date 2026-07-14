@@ -257,6 +257,43 @@ namespace CustomRPC
             copy.ResetRuntimeState();
             return copy;
         }
+
+        /// <summary>
+        /// Copies editor/presence fields from another slot, keeping SlotId and live connection state.
+        /// </summary>
+        public void ApplyPresenceFieldsFrom(PresenceSlot source)
+        {
+            if (source == null)
+                return;
+
+            Enabled = source.Enabled;
+            Label = source.Label;
+            ApplicationId = source.ApplicationId ?? "";
+            Pipe = source.Pipe;
+            Type = source.Type;
+            Display = source.Display;
+            Name = source.Name ?? "";
+            Details = source.Details ?? "";
+            DetailsUrl = source.DetailsUrl ?? "";
+            State = source.State ?? "";
+            StateUrl = source.StateUrl ?? "";
+            PartySize = source.PartySize;
+            PartyMax = source.PartyMax;
+            Timestamps = source.Timestamps;
+            CustomTimestamp = source.CustomTimestamp;
+            CustomTimestampEndEnabled = source.CustomTimestampEndEnabled;
+            CustomTimestampEnd = source.CustomTimestampEnd;
+            LargeImageKey = source.LargeImageKey ?? "";
+            LargeImageText = source.LargeImageText ?? "";
+            LargeImageUrl = source.LargeImageUrl ?? "";
+            SmallImageKey = source.SmallImageKey ?? "";
+            SmallImageText = source.SmallImageText ?? "";
+            SmallImageUrl = source.SmallImageUrl ?? "";
+            Button1Text = source.Button1Text ?? "";
+            Button1Url = source.Button1Url ?? "";
+            Button2Text = source.Button2Text ?? "";
+            Button2Url = source.Button2Url ?? "";
+        }
     }
 
     /// <summary>
