@@ -421,7 +421,7 @@ namespace CustomRPC.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
         public bool analytics {
             get {
                 return ((bool)(this["analytics"]));
@@ -433,7 +433,7 @@ namespace CustomRPC.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
         public bool analyticsAskedConsent {
             get {
                 return ((bool)(this["analyticsAskedConsent"]));

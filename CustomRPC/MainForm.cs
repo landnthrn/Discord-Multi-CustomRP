@@ -288,7 +288,17 @@ namespace CustomRPC
                 downloadUpdateToolStripMenuItem.Visible = false;
                 downloadUpdateToolStripMenuItem.Enabled = false;
             }
-            allowAnalyticsToolStripMenuItem.Checked = Analytics.IsEnabledAsync().Result;
+            // Fork: no telemetry to upstream / App Center for end users.
+            settings.analytics = false;
+            Utils.SaveSettings();
+            if (allowAnalyticsToolStripMenuItem != null)
+            {
+                allowAnalyticsToolStripMenuItem.Visible = false;
+                allowAnalyticsToolStripMenuItem.Enabled = false;
+            }
+            // checkUpdates + Allow Analytics are both hidden — drop the unused separator above them.
+            if (toolStripSeparatorSettings1 != null)
+                toolStripSeparatorSettings1.Visible = false;
             darkModeToolStripMenuItem.Checked = settings.darkMode;
 
             // Helper function that recursively gets all DropDownItems
@@ -1614,8 +1624,11 @@ namespace CustomRPC
                         CheckForUpdates();
                     break;
                 case "allowAnalytics":
-                    settings.analytics = setting.Checked;
-                    Analytics.SetEnabledAsync(setting.Checked);
+                    // Menu item is hidden; keep analytics forced off for this fork.
+                    settings.analytics = false;
+                    Analytics.SetEnabledAsync(false);
+                    if (allowAnalyticsToolStripMenuItem != null)
+                        allowAnalyticsToolStripMenuItem.Checked = false;
                     break;
                 case "darkMode":
                     settings.darkMode = setting.Checked;

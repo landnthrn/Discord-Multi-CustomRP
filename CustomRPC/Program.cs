@@ -153,17 +153,15 @@ namespace CustomRPC
 
             try
             {
-                if (!settings.analyticsAskedConsent) // First time launching the app since the analytics integration
+                if (!settings.analyticsAskedConsent)
                 {
-                    var result = QuietMessageBox.Show(Strings.askAnalyticsConsent, Strings.information, MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-
-                    var allowAnalytics = result == DialogResult.Yes;
-
-                    Analytics.SetEnabledAsync(allowAnalytics);
-                    settings.analytics = allowAnalytics;
+                    // Fork: never prompt; keep analytics off (upstream developer telemetry is not useful here).
+                    settings.analytics = false;
                     settings.analyticsAskedConsent = true;
                     Utils.SaveSettings();
                 }
+
+                Analytics.SetEnabledAsync(settings.analytics);
 
                 // Analytics and crashes
                 Crashes.ShouldProcessErrorReport = (ErrorReport report) =>
