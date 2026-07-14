@@ -50,12 +50,10 @@ namespace CustomRPC
         string cycleTransitionFromPath;
         List<PresenceSlot> cycleBaselineSlots;
         string cycleBaselineSelectedId;
-        bool cycleMatchOrderSuppressed;
-        bool cycleMatchOrderWasChecked;
-        /// <summary>True while Autoconnect is running after enabling/disabling Cycle Presets — keeps Connect All greyed out.</summary>
+        /// <summary>True while Autoconnect is running after enabling/disabling Cycle RP's — keeps Connect All greyed out.</summary>
         bool cycleAutoconnectInProgress;
         /// <summary>
-        /// Tray Disconnect cancelled Cycle Presets; tray Reconnect should turn it back on afterward.
+        /// Tray Disconnect cancelled Cycle RP's; tray Reconnect should turn it back on afterward.
         /// </summary>
         bool trayReconnectShouldRestoreCycle;
         string legacyTrayLastConnectedSlotId;
@@ -366,7 +364,7 @@ namespace CustomRPC
 
             PlaceSeparator(panelSeparator5, ref y);
 
-            // Right inset for the Cycle Presets block (higher = shift whole section left).
+            // Right inset for the Cycle RP's block (higher = shift whole section left).
             const int rightMargin = 11;
             const int gap = 6;
             int contentRight = Math.Max(rightMargin + 100, ClientSize.Width - rightMargin);
@@ -584,7 +582,7 @@ namespace CustomRPC
         }
 
         /// <summary>
-        /// Connect All when Settings → Autoconnect is on (used when enabling or disabling Cycle Presets).
+        /// Connect All when Settings → Autoconnect is on (used when enabling or disabling Cycle RP's).
         /// </summary>
         void MaybeAutoconnectForCycleSession()
         {
@@ -690,7 +688,7 @@ namespace CustomRPC
             }
 
             // .crp: Slot Swap only — disable Cycle Mode so Preset Swap cannot be chosen.
-            // Also lock Cycle Mode while Cycle Presets is active.
+            // Also lock Cycle Mode while Cycle RP's is active.
             comboBoxCycleMode.Enabled = allowPresetSwap && !IsCyclingEditLocked();
         }
 
@@ -830,7 +828,7 @@ namespace CustomRPC
             }
 
             // Snapshot chart slots only — never pull from the editor here.
-            // (On startup the editor is still empty when Cycle Presets was left on.)
+            // (On startup the editor is still empty when Cycle RP's was left on.)
             cycleBaselineSlots = slotService.Slots.Select(SlotStorage.CloneForExport).ToList();
             cycleBaselineSelectedId = selectedSlotId;
         }
@@ -864,33 +862,16 @@ namespace CustomRPC
 
         void ApplyMatchOrderSuppressionForCycleMode()
         {
-            // Match Order applies to both Slot Swap and Preset Swap.
-            RestoreMatchOrderAfterCycle();
+            // Match Order applies to both Slot Swap and Preset Swap — no suppression.
         }
 
         void RestoreMatchOrderAfterCycle()
         {
-            if (!cycleMatchOrderSuppressed || checkBoxMatchDiscordListOrder == null)
-                return;
-
-            syncingMatchListOrderToggle = true;
-            try
-            {
-                checkBoxMatchDiscordListOrder.Checked = cycleMatchOrderWasChecked;
-            }
-            finally
-            {
-                syncingMatchListOrderToggle = false;
-            }
-
-            settings.matchDiscordListOrder = cycleMatchOrderWasChecked;
-            Utils.SaveSettings();
-            cycleMatchOrderSuppressed = false;
-            UpdateMatchOrderDelayControls();
+            // Intentionally empty: Match Order is no longer forced off while cycling.
         }
 
         /// <summary>
-        /// Turns Cycle Presets off, restores the pre-cycle chart, and stops in-flight swaps.
+        /// Turns Cycle RP's off, restores the pre-cycle chart, and stops in-flight swaps.
         /// </summary>
         void CancelCyclePresetsSession(bool restoreBaseline = true)
         {
@@ -934,6 +915,9 @@ namespace CustomRPC
         void UpdateCyclingEditLock()
         {
             bool locked = IsCyclingEditLocked();
+
+            if (slotService != null)
+                slotService.SuppressPresenceErrorUi = locked;
 
             UpdateCyclingStatusBanner();
 
@@ -1111,6 +1095,7 @@ namespace CustomRPC
             var steps = BuildCycleSwapSteps(
                 slotService.Slots.ToList(),
                 targets,
+                pairByApplicationId: !settings.matchDiscordListOrder,
                 applyMatchOrder: settings.matchDiscordListOrder);
             if (steps.Count == 0)
             {
@@ -1179,7 +1164,27 @@ namespace CustomRPC
         static List<CycleSwapStep> BuildCycleSwapSteps(
             List<PresenceSlot> current,
             List<PresenceSlot> targets,
+            bool pairByApplicationId,
             bool applyMatchOrder)
+        {
+            if (current == null)
+                current = new List<PresenceSlot>();
+            if (targets == null)
+                targets = new List<PresenceSlot>();
+
+            var steps = pairByApplicationId
+                ? BuildCycleSwapStepsByApplicationId(current, targets)
+                : BuildCycleSwapStepsByIndex(current, targets);
+
+            if (applyMatchOrder)
+                return OrderCycleStepsForMatchOrder(steps);
+
+            return steps;
+        }
+
+        static List<CycleSwapStep> BuildCycleSwapStepsByIndex(
+            List<PresenceSlot> current,
+            List<PresenceSlot> targets)
         {
             var steps = new List<CycleSwapStep>();
             int count = Math.Max(current.Count, targets.Count);
@@ -1198,11 +1203,98 @@ namespace CustomRPC
                 });
             }
 
-            if (applyMatchOrder)
-                return OrderCycleStepsForMatchOrder(steps);
+            return steps;
+        }
+
+        /// <summary>
+        /// Pair by matching Application ID first; leftover slots fall back to chart order.
+        /// </summary>
+        static List<CycleSwapStep> BuildCycleSwapStepsByApplicationId(
+            List<PresenceSlot> current,
+            List<PresenceSlot> targets)
+        {
+            var steps = new List<CycleSwapStep>();
+            var usedCurrent = new HashSet<string>(StringComparer.Ordinal);
+            var usedTargets = new HashSet<int>();
+
+            for (int ti = 0; ti < targets.Count; ti++)
+            {
+                var tgt = targets[ti];
+                string targetId = NormalizeCycleApplicationId(tgt?.ApplicationId);
+                if (string.IsNullOrEmpty(targetId))
+                    continue;
+
+                PresenceSlot match = null;
+                foreach (var cur in current)
+                {
+                    if (cur == null || usedCurrent.Contains(cur.SlotId))
+                        continue;
+                    if (!string.Equals(
+                            NormalizeCycleApplicationId(cur.ApplicationId),
+                            targetId,
+                            StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    match = cur;
+                    break;
+                }
+
+                if (match == null)
+                    continue;
+
+                usedCurrent.Add(match.SlotId);
+                usedTargets.Add(ti);
+
+                if (CyclePresenceContentsEqual(match, tgt))
+                    continue;
+
+                steps.Add(new CycleSwapStep
+                {
+                    Incoming = tgt,
+                    OutgoingSlotId = match.SlotId,
+                });
+            }
+
+            var unusedCurrent = current
+                .Where(c => c != null && !usedCurrent.Contains(c.SlotId))
+                .ToList();
+            int unusedIdx = 0;
+
+            for (int ti = 0; ti < targets.Count; ti++)
+            {
+                if (usedTargets.Contains(ti))
+                    continue;
+
+                var tgt = targets[ti];
+                PresenceSlot cur = unusedIdx < unusedCurrent.Count ? unusedCurrent[unusedIdx++] : null;
+                if (cur != null)
+                    usedCurrent.Add(cur.SlotId);
+
+                if (cur != null && tgt != null && CyclePresenceContentsEqual(cur, tgt))
+                    continue;
+
+                steps.Add(new CycleSwapStep
+                {
+                    Incoming = tgt,
+                    OutgoingSlotId = cur?.SlotId,
+                });
+            }
+
+            while (unusedIdx < unusedCurrent.Count)
+            {
+                var cur = unusedCurrent[unusedIdx++];
+                steps.Add(new CycleSwapStep
+                {
+                    Incoming = null,
+                    OutgoingSlotId = cur.SlotId,
+                });
+            }
 
             return steps;
         }
+
+        static string NormalizeCycleApplicationId(string applicationId) =>
+            string.IsNullOrWhiteSpace(applicationId) ? "" : applicationId.Trim();
 
         static List<CycleSwapStep> OrderCycleStepsForMatchOrder(List<CycleSwapStep> steps)
         {
@@ -1274,14 +1366,32 @@ namespace CustomRPC
             if (outgoing == null || incoming == null)
                 return false;
 
-            string outId = (outgoing.ApplicationId ?? "").Trim();
-            string inId = (incoming.ApplicationId ?? "").Trim();
+            // Same App ID → update in place (never disconnect-first for ID clash).
+            string outId = NormalizeCycleApplicationId(outgoing.ApplicationId);
+            string inId = NormalizeCycleApplicationId(incoming.ApplicationId);
             if (!string.IsNullOrEmpty(outId) &&
                 string.Equals(outId, inId, StringComparison.OrdinalIgnoreCase))
-                return true;
+                return false;
 
+            // Keep Playing clash handling: don't leave two Playings live at once.
             return outgoing.ActivityType == ActivityType.Playing &&
                 incoming.ActivityType == ActivityType.Playing;
+        }
+
+        static bool CanCycleUpdateInPlace(PresenceSlot outgoing, PresenceSlot incoming)
+        {
+            if (outgoing == null || incoming == null)
+                return false;
+
+            string outId = NormalizeCycleApplicationId(outgoing.ApplicationId);
+            string inId = NormalizeCycleApplicationId(incoming.ApplicationId);
+            if (string.IsNullOrEmpty(outId) ||
+                !string.Equals(outId, inId, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return outgoing.IsConnected ||
+                outgoing.ConnectionState == SlotConnectionState.Connected ||
+                outgoing.ConnectionState == SlotConnectionState.UpdatingPresence;
         }
 
         async Task ExecutePendingSlotSwapStepAsync()
@@ -1518,6 +1628,21 @@ namespace CustomRPC
                 outgoing = slotService.GetSlot(step.OutgoingSlotId);
 
             PresenceSlot incoming = step.Incoming;
+
+            // Same App ID on a live connection: SetPresence only (no reconnect / no second slot).
+            if (CanCycleUpdateInPlace(outgoing, incoming))
+            {
+                outgoing.ApplyPresenceFieldsFrom(incoming);
+                if (!outgoing.Enabled)
+                    outgoing.Enabled = true;
+                selectedSlotId = outgoing.SlotId;
+                RefreshCycleChartUi();
+                slotService.SetPresenceForSlot(outgoing, showErrors: false, ignoreThrottle: true);
+                RefreshCycleChartUi();
+                SaveSlotsToStorage();
+                return;
+            }
+
             if (incoming != null)
             {
                 int insertAt = outgoing != null
@@ -1568,7 +1693,8 @@ namespace CustomRPC
             if (!slot.Enabled)
                 slot.Enabled = true;
 
-            slotService.ConnectSlot(slot);
+            // Cycle must never raise editing-mode restriction / build popups.
+            slotService.ConnectSlot(slot, showErrors: false);
             RefreshCycleChartUi();
 
             var deadline = DateTime.UtcNow.AddMilliseconds(CycleConnectWaitTimeoutMs);
