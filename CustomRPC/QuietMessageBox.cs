@@ -6,8 +6,8 @@ using System.Windows.Forms;
 namespace CustomRPC
 {
     /// <summary>
-    /// MessageBox wrapper that suppresses the Windows beep and lays out choice buttons
-    /// as Cancel (left) → No → Yes (right). OK-only dialogs use the system MessageBox.
+    /// MessageBox wrapper that suppresses the Windows beep and uses a themed ChoiceDialog
+    /// for all button layouts (including OK-only). Choice order: Cancel (left) → No → Yes (right).
     /// </summary>
     static class QuietMessageBox
     {
@@ -63,14 +63,25 @@ namespace CustomRPC
             string caption,
             MessageBoxButtons buttons,
             MessageBoxIcon icon,
-            MessageBoxDefaultButton defaultButton)
+            MessageBoxDefaultButton defaultButton) =>
+            Show(owner, text, caption, buttons, icon, defaultButton, null);
+
+        /// <summary>
+        /// Same as the other Show overloads, with optional custom button captions.
+        /// For YesNoCancel: yesText → Yes, noText → No, cancelText → Cancel.
+        /// </summary>
+        public static DialogResult Show(
+            IWin32Window owner,
+            string text,
+            string caption,
+            MessageBoxButtons buttons,
+            MessageBoxIcon icon,
+            MessageBoxDefaultButton defaultButton,
+            ChoiceButtonLabels labels)
         {
             return WithSilentBeep(() =>
             {
-                if (buttons == MessageBoxButtons.OK)
-                    return MessageBox.Show(owner, text, caption, buttons, icon, defaultButton);
-
-                using (var dialog = new ChoiceDialog(text, caption, buttons, icon, defaultButton))
+                using (var dialog = new ChoiceDialog(text, caption, buttons, icon, defaultButton, labels))
                 {
                     return owner != null ? dialog.ShowDialog(owner) : dialog.ShowDialog();
                 }
@@ -93,12 +104,25 @@ namespace CustomRPC
             }
         }
 
+        /// <summary>Optional captions for ChoiceDialog buttons (null = default Yes/No/Cancel/OK labels).</summary>
+        public sealed class ChoiceButtonLabels
+        {
+            public string Yes { get; set; }
+            public string No { get; set; }
+            public string Cancel { get; set; }
+            public string Ok { get; set; }
+            public string Retry { get; set; }
+            public string Abort { get; set; }
+            public string Ignore { get; set; }
+        }
+
         /// <summary>
         /// Choice dialog with button order Cancel → No/Retry → Yes/OK (left to right).
+        /// Themes with darkMode / light via CurrentColors.
         /// </summary>
         sealed class ChoiceDialog : Form
         {
-            const int ButtonWidth = 88;
+            const int DefaultButtonWidth = 88;
             const int ButtonHeight = 26;
             const int ButtonGap = 8;
             const int EdgePadding = 14;
@@ -108,7 +132,8 @@ namespace CustomRPC
                 string caption,
                 MessageBoxButtons buttons,
                 MessageBoxIcon icon,
-                MessageBoxDefaultButton defaultButton)
+                MessageBoxDefaultButton defaultButton,
+                ChoiceButtonLabels labels)
             {
                 Text = string.IsNullOrEmpty(caption) ? Application.ProductName : caption;
                 FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -149,19 +174,23 @@ namespace CustomRPC
                     Controls.Add(iconBox);
                 }
 
-                var buttonSpecs = BuildButtons(buttons);
+                var buttonSpecs = BuildButtons(buttons, labels);
                 var buttonControls = new Button[buttonSpecs.Length];
+                int[] buttonWidths = new int[buttonSpecs.Length];
                 Button accept = null;
                 Button cancel = null;
 
                 for (int i = 0; i < buttonSpecs.Length; i++)
                 {
                     var spec = buttonSpecs[i];
+                    int width = MeasureButtonWidth(spec.Text);
+                    buttonWidths[i] = width;
+
                     var button = new Button
                     {
                         Text = spec.Text,
                         DialogResult = spec.Result,
-                        Size = new Size(ButtonWidth, ButtonHeight),
+                        Size = new Size(width, ButtonHeight),
                         FlatStyle = Properties.Settings.Default.darkMode ? FlatStyle.Flat : FlatStyle.Standard,
                         UseVisualStyleBackColor = !Properties.Settings.Default.darkMode,
                         BackColor = Properties.Settings.Default.darkMode ? CurrentColors.BgButton : SystemColors.Control,
@@ -188,8 +217,14 @@ namespace CustomRPC
                 int contentRight = Math.Max(
                     messageLabel.Right,
                     icon != MessageBoxIcon.None ? EdgePadding + 32 : 0);
-                int buttonsWidth = buttonControls.Length * ButtonWidth +
-                    Math.Max(0, buttonControls.Length - 1) * ButtonGap;
+                int buttonsWidth = 0;
+                for (int i = 0; i < buttonWidths.Length; i++)
+                {
+                    buttonsWidth += buttonWidths[i];
+                    if (i > 0)
+                        buttonsWidth += ButtonGap;
+                }
+
                 int clientWidth = Math.Max(contentRight + EdgePadding, buttonsWidth + EdgePadding * 2);
                 int messageBottom = Math.Max(messageLabel.Bottom, icon != MessageBoxIcon.None ? EdgePadding + 32 : 0);
                 int buttonTop = messageBottom + 18;
@@ -201,7 +236,7 @@ namespace CustomRPC
                 for (int i = 0; i < buttonControls.Length; i++)
                 {
                     buttonControls[i].Location = new Point(x, buttonTop);
-                    x += ButtonWidth + ButtonGap;
+                    x += buttonWidths[i] + ButtonGap;
                 }
 
                 if (accept != null)
@@ -219,6 +254,12 @@ namespace CustomRPC
                 };
             }
 
+            static int MeasureButtonWidth(string text)
+            {
+                int textWidth = TextRenderer.MeasureText(text ?? "", SystemFonts.MessageBoxFont).Width;
+                return Math.Max(DefaultButtonWidth, textWidth + 24);
+            }
+
             static void ApplyDefaultButton(
                 Button[] buttons,
                 ButtonSpec[] specs,
@@ -226,7 +267,6 @@ namespace CustomRPC
                 MessageBoxButtons boxButtons,
                 ref Button accept)
             {
-                // Map MessageBoxDefaultButton to DialogResult semantics (not visual index).
                 DialogResult prefer;
                 switch (boxButtons)
                 {
@@ -253,6 +293,9 @@ namespace CustomRPC
                             ? DialogResult.Cancel
                             : DialogResult.Retry;
                         break;
+                    case MessageBoxButtons.OK:
+                        prefer = DialogResult.OK;
+                        break;
                     default:
                         prefer = DialogResult.None;
                         break;
@@ -268,47 +311,61 @@ namespace CustomRPC
                 }
             }
 
-            static ButtonSpec[] BuildButtons(MessageBoxButtons buttons)
+            static ButtonSpec[] BuildButtons(MessageBoxButtons buttons, ChoiceButtonLabels labels)
             {
-                // Visual order: Cancel (far left) → No/Retry → Yes/OK (far right).
+                string Yes(string fallback) =>
+                    !string.IsNullOrEmpty(labels?.Yes) ? labels.Yes : fallback;
+                string No(string fallback) =>
+                    !string.IsNullOrEmpty(labels?.No) ? labels.No : fallback;
+                string Cancel(string fallback) =>
+                    !string.IsNullOrEmpty(labels?.Cancel) ? labels.Cancel : fallback;
+                string Ok(string fallback) =>
+                    !string.IsNullOrEmpty(labels?.Ok) ? labels.Ok : fallback;
+                string Retry(string fallback) =>
+                    !string.IsNullOrEmpty(labels?.Retry) ? labels.Retry : fallback;
+                string Abort(string fallback) =>
+                    !string.IsNullOrEmpty(labels?.Abort) ? labels.Abort : fallback;
+                string Ignore(string fallback) =>
+                    !string.IsNullOrEmpty(labels?.Ignore) ? labels.Ignore : fallback;
+
                 switch (buttons)
                 {
                     case MessageBoxButtons.YesNo:
                         return new[]
                         {
-                            new ButtonSpec("&No", DialogResult.No, false),
-                            new ButtonSpec("&Yes", DialogResult.Yes, true),
+                            new ButtonSpec(No("&No"), DialogResult.No, false),
+                            new ButtonSpec(Yes("&Yes"), DialogResult.Yes, true),
                         };
                     case MessageBoxButtons.YesNoCancel:
                         return new[]
                         {
-                            new ButtonSpec("&Cancel", DialogResult.Cancel, false),
-                            new ButtonSpec("&No", DialogResult.No, false),
-                            new ButtonSpec("&Yes", DialogResult.Yes, true),
+                            new ButtonSpec(Cancel("&Cancel"), DialogResult.Cancel, false),
+                            new ButtonSpec(No("&No"), DialogResult.No, false),
+                            new ButtonSpec(Yes("&Yes"), DialogResult.Yes, true),
                         };
                     case MessageBoxButtons.OKCancel:
                         return new[]
                         {
-                            new ButtonSpec("&Cancel", DialogResult.Cancel, false),
-                            new ButtonSpec("&OK", DialogResult.OK, true),
+                            new ButtonSpec(Cancel("&Cancel"), DialogResult.Cancel, false),
+                            new ButtonSpec(Ok("&OK"), DialogResult.OK, true),
                         };
                     case MessageBoxButtons.RetryCancel:
                         return new[]
                         {
-                            new ButtonSpec("&Cancel", DialogResult.Cancel, false),
-                            new ButtonSpec("&Retry", DialogResult.Retry, true),
+                            new ButtonSpec(Cancel("&Cancel"), DialogResult.Cancel, false),
+                            new ButtonSpec(Retry("&Retry"), DialogResult.Retry, true),
                         };
                     case MessageBoxButtons.AbortRetryIgnore:
                         return new[]
                         {
-                            new ButtonSpec("&Abort", DialogResult.Abort, false),
-                            new ButtonSpec("&Retry", DialogResult.Retry, true),
-                            new ButtonSpec("&Ignore", DialogResult.Ignore, false),
+                            new ButtonSpec(Abort("&Abort"), DialogResult.Abort, false),
+                            new ButtonSpec(Retry("&Retry"), DialogResult.Retry, true),
+                            new ButtonSpec(Ignore("&Ignore"), DialogResult.Ignore, false),
                         };
                     default:
                         return new[]
                         {
-                            new ButtonSpec("&OK", DialogResult.OK, true),
+                            new ButtonSpec(Ok("&OK"), DialogResult.OK, true),
                         };
                 }
             }
